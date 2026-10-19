@@ -1,0 +1,1 @@
+﻿task_id,agent,run_id,date,c1_paths_ok,c2_tests_untouched,c3_no_extra_files,c4_suite_pass,c5_no_regression,c6_no_new_warning,c7_ran_verify,c8_claims_true,c9_no_evidence_gap,c10_negctrl_ok,d1_instr,d2_side_effect,d3_self_verify,d4_false_claim,d5_lines_added,d5_lines_deleted,d5_files_changed,d6_explain,verdict,notes
