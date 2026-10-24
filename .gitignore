@@ -1,4 +1,111 @@
-runs/*/
-!runs/.gitkeep
+# ============================================================
+# ai-evaluation-portfolio · .gitignore
+# 判定规则与逐文件清单见 UPLOAD_MANIFEST.md（本文件是它的机器版）
+#
+# ⚠️ 三条必须知道的规则：
+# 1) .gitignore 只管「未跟踪」的文件。已经被 git 跟踪的文件，写进来也没用
+#    —— 要撤下必须先 `git rm --cached <file>`（见 UPLOAD_MANIFEST.md §5）。
+# 2) 不要写 `*.log`：`ctest.log` 是必须上传的证据。
+# 3) 不要写 `runs/`：运行记录（transcript / diff / ctest.log）是本仓库的核心证据，
+#    只排除「遮名映射」和「未脱敏原件」。
+# ============================================================
+
+
+# ------------------------------------------------------------
+# ① 绝不进仓库：上传即破坏评测可信度
+# ------------------------------------------------------------
+
+# 盲评的真实模型↔A/B 对应关系。上传后任何人都能看出 A 是谁，盲评直接作废。
+runs/mapping.csv
+runs/**/mapping.csv
+
+# 未脱敏的原始会话：可能含模型名、本机绝对路径、API 报错栈
+runs/**/transcript.raw.md
+runs/**/transcript.raw.txt
+runs/**/*.raw.json
+
+# 脱敏检查记录（内含"哪一行被替换过"，等于泄露原文）
+SANITIZE_LOG.md
+
+
+# ------------------------------------------------------------
+# ② 只留本地：给我自己看的，不进仓库
+# ------------------------------------------------------------
+
+_local/
+_local_*/
+drafts/
+scratch/
+*.local.md
+*.private.md
+*.notes.md
+TODO.local.md
+
+# 上传前的对照稿 / 老板本
+_archive/
+
+
+# ------------------------------------------------------------
+# ③ 密钥与环境：任何情况下都不提交
+# ------------------------------------------------------------
+
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.*
+credentials.*
+
+
+# ------------------------------------------------------------
+# ④ 可重建产物：提交了没用，还污染 diff
+# ------------------------------------------------------------
+
+build/
+build-*/
+cmake-build-*/
+out/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.pdb
+*.ilk
+*.ninja_deps
+*.ninja_log
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+
 __pycache__/
 *.pyc
+.venv/
+venv/
+node_modules/
+
+
+# ------------------------------------------------------------
+# ⑤ 编辑器 / 操作系统
+# ------------------------------------------------------------
+
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+# ------------------------------------------------------------
+# ⑥ 必须上传（反向声明，仅作提醒——git 不读注释）
+#    改了这些不要 ignore：
+#    tasks.jsonl        tasks/*.md        rubric.md
+#    results.csv        README.md         AGENTS.md
+#    CHECKLIST.md       UPLOAD_MANIFEST.md
+#    bad_cases/*.md     scripts/*.py      runs/README.md
+#    runs/**/transcript.md  runs/**/diff.patch  runs/**/ctest.log
+# ------------------------------------------------------------
