@@ -1,0 +1,569 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index df2101d..3aadb14 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -90,9 +90,11 @@ macro(mgi_target_common tgt)
+ endmacro()
+ 
+ # ── 核心库（M3–M6：IndexDatabase + ScanService + StateEngine + TagEngine + QueryEngine + ViewEngine） ──
++find_package(Threads REQUIRED)   # M16 单写者队列（WriteQueue）使用 std::thread
+ add_library(mgi_core STATIC
+     src/core/Json.cpp
+     src/database/IndexDatabase.cpp
++    src/database/WriteQueue.cpp
+     src/scanner/ScanService.cpp
+     src/scanner/MetadataReader.cpp
+     src/status/StateEngine.cpp
+@@ -108,6 +110,7 @@ add_library(mgi_core STATIC
+     src/plugin/CsvExportPlugin.cpp
+ )
+ mgi_target_common(mgi_core)
++target_link_libraries(mgi_core PUBLIC Threads::Threads)
+ if(WIN32)
+     target_sources(mgi_core PRIVATE src/provider/WinHttpTransport.cpp)
+     target_link_libraries(mgi_core PUBLIC winhttp)
+@@ -172,6 +175,13 @@ target_link_libraries(mgi_tests_m10_m11 PRIVATE mgi_core)
+ mgi_target_common(mgi_tests_m10_m11)
+ add_test(NAME mgi_m10_m11 COMMAND mgi_tests_m10_m11)
+ 
++add_executable(mgi_tests_m16
++    tests/test_m16_writequeue.cpp
++)
++target_link_libraries(mgi_tests_m16 PRIVATE mgi_core)
++mgi_target_common(mgi_tests_m16)
++add_test(NAME mgi_m16 COMMAND mgi_tests_m16)
++
+ if(ENABLE_TAGLIB)
+     add_executable(mgi_tests_m14
+         tests/test_m14_taglib.cpp
+diff --git a/README.md b/README.md
+index fa8cecc..a80d1ff 100644
+--- a/README.md
++++ b/README.md
+@@ -14,6 +14,7 @@
+ 
+ - `mgi_core`（静态库）
+   - `database/IndexDatabase` — 目标态 SQLite schema（entity/类型明细/物理层/关系/标签/六维状态/Claim/外部源/View/扫描会话）+ 版本化迁移（R1002）与迁移前备份（R1003）
++  - `database/WriteQueue` — 单写者写入队列（D020/M16）：串行执行 + 优先级 + 取消 + 事务整体回滚（错误传回调用方）+ 关闭排空
+   - `scanner/ScanService` — 增量、幂等扫描（新增/删除/移动/重命名检测、物理状态、扫描会话与事件、数据来源 Claim，规范见 `docs/09-SCAN_IMPORT_SPEC.md`）
+   - `status/StateEngine` — 六维状态权限矩阵、ACQUISITION 状态机、人工标记、有效状态（用户显式 ?? 派生）、父子派生聚合与 `derived_changed_at` 信号（`docs/05-STATE_SPEC.md`）
+   - `tag/TagEngine` — 标签 CRUD/合并/重命名，文件夹标签继承查询（递归 CTE，不落库，`docs/06-TAG_SPEC.md`）
+diff --git a/docs/15-TEST_SPEC.md b/docs/15-TEST_SPEC.md
+index 2ebf242..aa1c4ef 100644
+--- a/docs/15-TEST_SPEC.md
++++ b/docs/15-TEST_SPEC.md
+@@ -143,6 +143,19 @@
+ | T-PLG-02 | 损坏/未注册插件 | 不阻止主程序启动 |
+ | T-PLG-03 | 版本不匹配 | manifest.api_version 校验并明确拒绝 |
+ 
++### 3.12 单写者队列（T-WQ，对应 D020、13-ARCHITECTURE A5/§5；M16）
++
++| ID | 用例 | 通过标准 |
++| --- | --- | --- |
++| T-WQ-01 | 多生产者并发提交，队列串行写 | 数据库一致；独立读连接（WAL）计数正确（mgi_tests_m16 M16-1） |
++| T-WQ-02 | 优先级调度 | High > Normal > Low；同优先级 FIFO（M16-2） |
++| T-WQ-03 | 任务失败：错误传播 + 事务整体回滚 | 异常达调用方；半写数据不落库；队列继续可用（M16-3） |
++| T-WQ-04 | 取消排队中（未开始）的 cancellable 任务 | 跳过执行、无副作用、future 正常完成（M16-4） |
++| T-WQ-05 | shutdown(true) 排空；停止后提交被拒绝 | 全部排队任务执行完；此后 submit 抛异常（M16-5） |
++| T-WQ-06 | 回滚安全网：自管事务任务抛异常遗留未决事务 | 队列兜底 ROLLBACK，半写数据不入库，后续任务不受污染（M16-6） |
++
++证据：`mgi_tests_m16`（tests/test_m16_writequeue.cpp），18/18 checks。
++
+ ## 4. 审计红线（Review/M12 必查，出现即 FAIL）
+ 
+ ```text
+diff --git a/docs/16-ROADMAP.md b/docs/16-ROADMAP.md
+index a86bfcf..525ab56 100644
+--- a/docs/16-ROADMAP.md
++++ b/docs/16-ROADMAP.md
+@@ -110,7 +110,7 @@ M13–M18 基础设施稳定化 → M19–M22 数据质量 + 外部生态 → M2
+ | M13 | Post-M12 收口验收（UNVERIFIED 分类/用户验收/发布标准） | 🔄 进行中（2026-09-06） |
+ | M14 | TagLib 实测 | ✅ 完成（2026-09-06，6 格式 18/18） |
+ | M15 | 内容指纹 | ✅ 完成（2026-09-06，22/22） |
+-| M16 | 单写者队列 | ⬜ |
++| M16 | 单写者队列 | ✅ 完成（2026-10-28，m16 18/18） |
+ | M17 | 异步扫描 | ⬜ |
+ | M18 | 文件系统 Reconciliation | ⬜ |
+ | M19 | 数据质量/去重/合并 | ⬜ |
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index 64168b4..150cc7c 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -4,6 +4,12 @@
+ 
+ ## [未发布]
+ 
++### 2026-10-28 — M16 单写者队列完成（UNVERIFIED A3 收口）
++
++**`database/WriteQueue`**（D020 组件化，13-ARCHITECTURE A5/§5）：唯一写线程串行执行全部投递的写任务（`submit` 原样执行，兼容 ScanService/Matcher 自管事务模式；`submitInTransaction` 队列代管 BEGIN IMMEDIATE→COMMIT，多语句写原子）；优先级 High > Normal > Low、同优先级 FIFO；排队中 cancellable 任务可 `tryCancel`（已开始不可中断）；任务异常经 future/`submitAndWait` 传回调用方；失败整体回滚——队列代管事务异常即 ROLLBACK，自管事务遗留的未决事务由安全网兜底 ROLLBACK（`IndexDatabase::inTransaction()`，sqlite3_get_autocommit），杜绝"写一半被后续任务意外提交"；`shutdown(true)`/析构排空队列（程序退出不丢任务），`shutdown(false)` 未执行任务以异常完成。WAL 保持读并发（独立读连接不受写阻塞）。
++
++测试 `mgi_tests_m16`（15 §3.12 T-WQ-01…06）18/18：并发多生产者一致性 + Reader 并发、优先级/FIFO、异常传播 + 回滚、取消、关闭排空、回滚安全网；连续 8 次 ALL PASS。全量回归 ctest **10/10 套件**通过。
++
+ ### 2026-09-06 — GUI 验收自动化 + M15 内容指纹完成
+ 
+ **GUI 验收自动化**（应用户要求替代人工验收的功能部分）：`mgi_gui` 静态库抽出；`mgi_tests_gui`（offscreen，44/44）覆盖 USER_ACCEPTANCE §1–§5 功能项：启动扫描/8 页签/幂等重扫、编辑器只列合法转换、状态修改即时可见、显示全部切换、标签继承* 角标、中文显示、图构建与点击选中（修复"只有点中文本可选中"的真实缺陷）、详情内容、搜索命中/空结果、扫描不覆盖用户状态、迁移备份安全网。MainWindow 增加 db 路径参数与 runSearch 公共入口。
+diff --git a/docs/UNVERIFIED_REGISTER.md b/docs/UNVERIFIED_REGISTER.md
+index 0bcc0a5..8c9cc64 100644
+--- a/docs/UNVERIFIED_REGISTER.md
++++ b/docs/UNVERIFIED_REGISTER.md
+@@ -8,7 +8,7 @@
+ | --- | --- | --- | --- | --- |
+ | A1 | R103 TagLib 实际标签解析（MP3/FLAC/OGG/Opus/M4A/WAV） | **M14** | ✅ **CLOSED**（2026-09-06） | TagLib 2.0.2 vendor（third_party/taglib）；6 格式真实样本（ffmpeg 生成、含标签）全管线验证：FILE_TAG/display_artist Claim、tag_parsed=1、音频技术元数据、tag_json 留档、同曲多格式归并同一 Recording（D007）、FILE_TAG 不覆盖 USER 有效值（R902）、损坏文件降级不阻断（mgi_tests_m14 18/18）。遗留：DSF/DFF 等小众格式按需扩展（D014 原文） |
+ | A2 | 内容指纹（D017 后半：哈希计算/缓存/移动判定强化） | **M15** | ✅ **CLOSED**（2026-09-06） | sha256 流式实现（core/Hashing）；新文件/内容变化即时计算（512MB 上限，超限后台策略）+ `backfillHashes` 补算；移动匹配二级确认：指纹不一致直接排除候选，一致则 `verified:1, hash_confirmed:1`（mgi_tests_m15 22/22）。遗留：真正后台空闲调度随 M16/M17 线程基础设施落地 |
+-| A3 | 单写者队列（多线程写一致性，D020 组件化） | M16 | 待开始 | 队列组件 + 并发 Reader/Writer 测试 |
++| A3 | 单写者队列（多线程写一致性，D020 组件化） | **M16** | ✅ **CLOSED**（2026-10-28） | `database/WriteQueue` 单写者队列（串行 + 优先级 + 取消 + 事务整体回滚 + 关闭排空，IndexDatabase 增 `inTransaction()` 回滚安全网）；并发多生产者/独立 Reader（WAL）测试入 `mgi_tests_m16` 18/18（15 §3.12 T-WQ-01…06，连续 8 次 ALL PASS）。遗留：GUI/扫描线程接线随 M17 异步扫描落地 |
+ | A4 | 异步扫描（GUI 不阻塞、取消语义） | M17 | 依赖 A3 | 异步 Scanner + 取消/暂停/进度测试 |
+ | A5 | 文件系统 Reconciliation（复制/重复/失效路径识别） | M18 | 待开始 | Reconcile Report + 连续扫描零重复断言 |
+ | A6 | CAA 实网封面获取 | M20+ | 待开始 | live smoke 扩展真实 MBID getArtworkUrls |
+diff --git a/include/database/IndexDatabase.h b/include/database/IndexDatabase.h
+index f49dfaf..b113eae 100644
+--- a/include/database/IndexDatabase.h
++++ b/include/database/IndexDatabase.h
+@@ -127,6 +127,7 @@ public:
+     void begin();
+     void commit();
+     void rollback();
++    bool inTransaction() const;   // 事务未决判定（sqlite3_get_autocommit；WriteQueue 回滚安全网用）
+     void execRaw(const std::string& sql);   // 测试与诊断专用
+     long long scalarQuery(const std::string& sql);  // 测试与诊断：取单行单列
+     std::string scalarQueryText(const std::string& sql); // 测试与诊断：取单行文本列
+diff --git a/include/database/WriteQueue.h b/include/database/WriteQueue.h
+new file mode 100644
+index 0000000..086a058
+--- /dev/null
++++ b/include/database/WriteQueue.h
+@@ -0,0 +1,127 @@
++#pragma once
++
++// WriteQueue — M16 单写者写入队列（D020 组件化；13-ARCHITECTURE A5/§5）。
++//
++// 解决的问题：多个界面/后台流程同时写库时偶发 "database is locked"、
++// 失败后数据"写进去一半"需要手工修复。规则（D020）：
++//   - 所有写操作只经本队列投递，由唯一写线程串行执行（WAL 下读连接不受阻塞）；
++//   - 支持任务优先级（High > Normal > Low，同优先级 FIFO）；
++//   - 排队中（未开始执行）的 cancellable 任务可取消；
++//   - 事务失败整体回滚，异常/错误经 future 传回调用方；
++//   - shutdown(true)/析构时队列排空（程序退出不丢任务）。
++//
++// 线程纪律（调用方约定）：
++//   - 任意线程可 submit / tryCancel / drain / shutdown；
++//   - 任务 lambda 在写线程上执行，经 writer() 访问同一个 IndexDatabase；
++//     队列活跃期间，调用方不得在其他线程直接使用该 IndexDatabase 写库；
++//   - 两条提交路径：
++//       submit()               —— 原样执行任务（任务内部可自管 db.begin/commit，
++//                                 与 ScanService/Matcher 现行事务模式兼容）；
++//       submitInTransaction()  —— 队列代管事务：BEGIN IMMEDIATE → 任务 → COMMIT，
++//                                 任何异常 → ROLLBACK（多语句写必须走这条，保证原子性）；
++//     两条路径失败时都有回滚安全网：任务遗留的未决事务一律 ROLLBACK，
++//     防止"写一半"的数据被后续任务意外提交（对应用户报告的手工修复场景）。
++//
++// 测试证据：tests/test_m16_writequeue.cpp（mgi_tests_m16）。
++
++#include "database/IndexDatabase.h"
++
++#include <atomic>
++#include <condition_variable>
++#include <cstdint>
++#include <functional>
++#include <future>
++#include <memory>
++#include <mutex>
++#include <thread>
++#include <vector>
++
++namespace mgi {
++
++class WriteQueue {
++public:
++    // 任务优先级：数值大的先执行；同优先级按提交顺序（FIFO）。
++    enum class Priority : int { Low = 0, Normal = 1, High = 2 };
++
++    using Task = std::function<void()>;
++
++    // 持有唯一写连接（不转移所有权；生命周期必须覆盖队列）。
++    explicit WriteQueue(IndexDatabase& writer);
++    // RAII 排空：析构 = shutdown(true)——执行完所有排队任务后停线程。
++    ~WriteQueue();
++
++    WriteQueue(const WriteQueue&) = delete;
++    WriteQueue& operator=(const WriteQueue&) = delete;
++
++    // 提交任务（原样执行，不做事务包装）。
++    // 返回 future：任务抛出的异常在 future.get()/submitAndWait 处重抛（错误传给调用方）。
++    // cancellable=true 时，任务未开始前可被 tryCancel 取消（取消 = future 正常完成，跳过执行）。
++    std::future<void> submit(Task task, Priority priority = Priority::Normal,
++                             bool cancellable = false);
++
++    // 提交并在队列代管的事务中执行：BEGIN IMMEDIATE → task() → COMMIT；
++    // task() 或 COMMIT 抛异常 → ROLLBACK，异常经 future 传回（整体回滚语义）。
++    std::future<void> submitInTransaction(Task task, Priority priority = Priority::Normal,
++                                          bool cancellable = false);
++
++    // 提交并阻塞等待完成；任务异常在此重抛。多个线程可并发调用。
++    void submitAndWait(Task task, Priority priority = Priority::Normal);
++
++    // 写连接：任务在写线程上执行时经此访问数据库（D020 单写者纪律）。
++    IndexDatabase& writer() { return writer_; }
++
++    // 取消排队中的任务（仅 cancellable 且未开始执行的可取消）。
++    // 返回 true = 已取消（不会执行）；false = 已开始/已完成/不存在/不可取消。
++    bool tryCancel(std::uint64_t taskId);
++
++    // 测试钩子：下一个 submit 将分配的任务 id（id 从 1 起单调递增）。
++    std::uint64_t nextIdForTest() const { return nextId_.load(); }
++
++    // 阻塞等待：所有已入队任务执行完毕（队列空且写线程空闲）。
++    void drain();
++
++    // 停止接收新任务（此后 submit 抛 std::runtime_error）。
++    //   drainPending=true ：先执行完所有排队任务再停止（程序退出用；析构等价）；
++    //   drainPending=false：立即停止，未执行任务以异常完成（future.get() 抛出）。
++    void shutdown(bool drainPending);
++
++    // 当前是否已停止接收新任务（诊断用）。
++    bool isShuttingDown() const { return !accepting_.load(); }
++
++private:
++    struct Item {
++        std::uint64_t id{0};
++        Priority priority{Priority::Normal};
++        bool cancellable{false};
++        bool canceled{false};        // tryCancel 置位；弹出时发现则跳过执行
++        bool inTransaction{false};   // submitInTransaction 置位（队列代管事务）
++        std::shared_ptr<std::promise<void>> promise{std::make_shared<std::promise<void>>()};
++        Task task;
++    };
++    // 堆序：优先级高者优先；同优先级 id 小者（先提交）优先。
++    struct PendingOrder {
++        bool operator()(const std::shared_ptr<Item>& a,
++                        const std::shared_ptr<Item>& b) const;
++    };
++
++    std::future<void> enqueue(std::shared_ptr<Item> item);
++    void workerLoop();
++    void runItem(Item& item);   // 永不向线程外抛异常
++
++    IndexDatabase& writer_;
++    std::thread worker_;
++
++    mutable std::mutex mutex_;
++    std::mutex shutdownMutex_;          // shutdown 串行化（并发/析构重复调用安全）
++    std::condition_variable workCv_;    // 唤醒写线程（新任务 / 停止）
++    std::condition_variable idleCv_;    // drain 等待（队列空且写线程空闲）
++    std::vector<std::shared_ptr<Item>> heap_;   // pending 堆（push_heap/pop_heap）
++
++    std::atomic<std::uint64_t> nextId_{1};
++    std::atomic<bool> accepting_{true};
++    bool busy_{false};             // 写线程正在执行任务（mutex_ 保护）
++    bool stopRequested_{false};    // shutdown 已调用（mutex_ 保护）
++    bool drainPending_{false};     // stop 前是否排空（mutex_ 保护）
++};
++
++} // namespace mgi
+diff --git a/src/database/IndexDatabase.cpp b/src/database/IndexDatabase.cpp
+index 89f30c9..787b739 100644
+--- a/src/database/IndexDatabase.cpp
++++ b/src/database/IndexDatabase.cpp
+@@ -37,6 +37,7 @@ using column_type_fn = int (*)(sqlite3_stmt*, int);
+ using column_int_fn = int (*)(sqlite3_stmt*, int);
+ using last_insert_rowid_fn = sqlite3_int64 (*)(sqlite3*);
+ using changes_fn = int (*)(sqlite3*);
++using get_autocommit_fn = int (*)(sqlite3*);
+ 
+ inline HMODULE module = nullptr;
+ inline open_fn p_open = nullptr;
+@@ -57,6 +58,7 @@ inline column_type_fn p_column_type = nullptr;
+ inline column_int_fn p_column_int = nullptr;
+ inline last_insert_rowid_fn p_last_insert_rowid = nullptr;
+ inline changes_fn p_changes = nullptr;
++inline get_autocommit_fn p_get_autocommit = nullptr;
+ 
+ #if defined(__GNUC__)
+ #pragma GCC diagnostic push
+@@ -104,6 +106,7 @@ void ensureLoaded() {
+     load(p_column_int, "sqlite3_column_int");
+     load(p_last_insert_rowid, "sqlite3_last_insert_rowid");
+     load(p_changes, "sqlite3_changes");
++    load(p_get_autocommit, "sqlite3_get_autocommit");
+ }
+ 
+ int open(const char* fileName, sqlite3** db) {
+@@ -196,6 +199,11 @@ int changes(sqlite3* db) {
+     return p_changes(db);
+ }
+ 
++int get_autocommit(sqlite3* db) {
++    ensureLoaded();
++    return p_get_autocommit(db);
++}
++
+ } // namespace sqlite_api
+ 
+ class Statement final {
+@@ -329,6 +337,12 @@ void IndexDatabase::rollback() {
+     exec("ROLLBACK;");
+ }
+ 
++bool IndexDatabase::inTransaction() const {
++    // sqlite3_get_autocommit()==0 ⇔ 事务未决。WriteQueue 失败回滚安全网用
++    // （任务抛异常后遗留的未决事务必须 ROLLBACK，防止半写数据被后续任务意外提交）。
++    return sqlite_api::get_autocommit(db_) == 0;
++}
++
+ void IndexDatabase::bindText(sqlite3_stmt* stmt, int index, const std::string& value) const {
+     if (sqlite_api::bind_text(stmt, index, value.c_str()) != SQLITE_OK) {
+         throw std::runtime_error(sqlite_api::errmsg(db_));
+diff --git a/src/database/WriteQueue.cpp b/src/database/WriteQueue.cpp
+new file mode 100644
+index 0000000..efa0003
+--- /dev/null
++++ b/src/database/WriteQueue.cpp
+@@ -0,0 +1,201 @@
++#include "database/WriteQueue.h"
++
++#include <stdexcept>
++#include <utility>
++
++namespace mgi {
++
++namespace {
++
++// promise 只能 set 一次；任何 fulfillment 异常（future_error）都不得逃出写线程。
++void fulfillValue(std::promise<void>& promise) noexcept {
++    try {
++        promise.set_value();
++    } catch (...) {
++    }
++}
++
++void fulfillException(std::promise<void>& promise, std::exception_ptr error) noexcept {
++    try {
++        promise.set_exception(std::move(error));
++    } catch (...) {
++    }
++}
++
++} // namespace
++
++// ───────────────────────────── 生命周期 ─────────────────────────────
++
++WriteQueue::WriteQueue(IndexDatabase& writer) : writer_(writer) {
++    worker_ = std::thread([this] { workerLoop(); });
++}
++
++WriteQueue::~WriteQueue() {
++    shutdown(/*drainPending=*/true);   // 程序退出/对象销毁：排空队列（D020/M16）
++}
++
++// ───────────────────────────── 提交路径 ─────────────────────────────
++
++std::future<void> WriteQueue::submit(Task task, Priority priority, bool cancellable) {
++    auto item = std::make_shared<Item>();
++    item->id = nextId_.fetch_add(1);
++    item->priority = priority;
++    item->cancellable = cancellable;
++    item->task = std::move(task);
++    return enqueue(std::move(item));
++}
++
++std::future<void> WriteQueue::submitInTransaction(Task task, Priority priority,
++                                                  bool cancellable) {
++    auto item = std::make_shared<Item>();
++    item->id = nextId_.fetch_add(1);
++    item->priority = priority;
++    item->cancellable = cancellable;
++    item->inTransaction = true;
++    item->task = std::move(task);
++    return enqueue(std::move(item));
++}
++
++void WriteQueue::submitAndWait(Task task, Priority priority) {
++    submit(std::move(task), priority).get();   // 异常在调用方线程重抛（错误传给调用方）
++}
++
++std::future<void> WriteQueue::enqueue(std::shared_ptr<Item> item) {
++    std::future<void> future = item->promise->get_future();
++    {
++        std::lock_guard<std::mutex> lock(mutex_);
++        if (stopRequested_) {
++            throw std::runtime_error("WriteQueue: 已 shutdown，拒绝新任务 (id=" +
++                                     std::to_string(item->id) + ")");
++        }
++        heap_.push_back(std::move(item));
++        std::push_heap(heap_.begin(), heap_.end(), PendingOrder{});
++    }
++    workCv_.notify_one();
++    return future;
++}
++
++// ───────────────────────────── 取消 / 排空 / 停止 ─────────────────────────────
++
++bool WriteQueue::tryCancel(std::uint64_t taskId) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    for (auto& item : heap_) {
++        if (item->id == taskId) {
++            if (!item->cancellable) {
++                return false;   // 未标记 cancellable 的任务不可取消
++            }
++            item->canceled = true;   // 写线程弹出时发现则跳过执行
++            return true;
++        }
++    }
++    return false;   // 不在队列 = 已开始执行/已完成/不存在
++}
++
++void WriteQueue::drain() {
++    std::unique_lock<std::mutex> lock(mutex_);
++    idleCv_.wait(lock, [this] { return heap_.empty() && !busy_; });
++}
++
++void WriteQueue::shutdown(bool drainPending) {
++    std::lock_guard<std::mutex> joinLock(shutdownMutex_);   // 并发/重复 shutdown（含析构）安全
++    {
++        std::lock_guard<std::mutex> lock(mutex_);
++        stopRequested_ = true;      // 幂等：enqueue 从此拒绝新任务
++        drainPending_ = drainPending;
++        accepting_.store(false);
++    }
++    workCv_.notify_all();
++    if (drainPending) {
++        drain();   // 排空：所有已入队任务执行完毕
++    }
++    if (worker_.joinable()) {
++        worker_.join();
++    }
++    // drainPending=false 时未执行的任务已在 workerLoop 退出路径以异常完成
++    // （future.get() 抛 std::runtime_error），不会悬挂调用方。
++}
++
++// ───────────────────────────── 写线程 ─────────────────────────────
++
++bool WriteQueue::PendingOrder::operator()(const std::shared_ptr<Item>& a,
++                                          const std::shared_ptr<Item>& b) const {
++    if (a->priority != b->priority) {
++        return a->priority < b->priority;   // 堆顶 = 优先级最高
++    }
++    return a->id > b->id;   // 同优先级：id 小（先提交）为堆顶 → FIFO
++}
++
++void WriteQueue::workerLoop() {
++    std::unique_lock<std::mutex> lock(mutex_);
++    for (;;) {
++        workCv_.wait(lock, [this] { return stopRequested_ || !heap_.empty(); });
++
++        if (stopRequested_ && (heap_.empty() || !drainPending_)) {
++            // 不排空停止：剩余任务以异常完成，调用方 future.get() 可感知
++            for (auto& item : heap_) {
++                fulfillException(*item->promise, std::make_exception_ptr(
++                    std::runtime_error("WriteQueue: shutdown(drainPending=false)，"
++                                       "任务未执行即被丢弃")));
++            }
++            heap_.clear();
++            idleCv_.notify_all();
++            return;
++        }
++
++        // 取最高优先级（同优先级 FIFO）
++        std::pop_heap(heap_.begin(), heap_.end(), PendingOrder{});
++        std::shared_ptr<Item> item = heap_.back();
++        heap_.pop_back();
++        busy_ = true;
++        lock.unlock();
++
++        runItem(*item);   // 捕获一切异常并写入 promise，写线程永不因任务失败死亡
++
++        lock.lock();
++        busy_ = false;
++        idleCv_.notify_all();
++    }
++}
++
++void WriteQueue::runItem(Item& item) {
++    if (item.canceled) {
++        fulfillValue(*item.promise);   // 取消 = 正常完成（跳过执行）
++        return;
++    }
++
++    // 队列代管事务（submitInTransaction）：BEGIN IMMEDIATE → 任务 → COMMIT。
++    // 若写连接已处于事务中（调用方线程纪律违例），不再嵌套 BEGIN，交由
++    // 下方的回滚安全网兜底——SQLite 无嵌套事务，BEGIN 会直接报错。
++    bool queueBeganTx = false;
++    if (item.inTransaction && !writer_.inTransaction()) {
++        try {
++            writer_.begin();   // BEGIN IMMEDIATE
++            queueBeganTx = true;
++        } catch (...) {
++            fulfillException(*item.promise, std::current_exception());
++            return;
++        }
++    }
++
++    try {
++        item.task();
++        if (queueBeganTx) {
++            writer_.commit();
++        }
++        fulfillValue(*item.promise);
++    } catch (...) {
++        // 失败整体回滚（安全网）：无论事务由队列开启还是任务自管
++        // （ScanService/Matcher 模式），遗留的未决事务一律 ROLLBACK，
++        // 防止"写一半"的数据被后续任务意外提交。回滚自身失败不吞掉原异常。
++        std::exception_ptr error = std::current_exception();
++        try {
++            if (writer_.inTransaction()) {
++                writer_.rollback();
++            }
++        } catch (...) {
++        }
++        fulfillException(*item.promise, std::move(error));
++    }
++}
++
++} // namespace mgi
+diff --git a/tests/test_m16_writequeue.cpp b/tests/test_m16_writequeue.cpp
+index f9b9acb..6fa6799 100644
+--- a/tests/test_m16_writequeue.cpp
++++ b/tests/test_m16_writequeue.cpp
+@@ -177,6 +177,34 @@ void testShutdownDrain() {
+     CHECK(rejected);
+ }
+ 
++// ── T6：回滚安全网——自管事务任务抛异常遗留未决事务，队列兜底 ROLLBACK ──
++// 对应用户报告："失败后数据只写进去一半，需要手工修复"：
++// 任务自管 BEGIN 后写一半即失败且未 ROLLBACK 时，队列不得把半写数据
++// 留给后续任务意外提交（否则残留事务还会毒化后续 BEGIN IMMEDIATE）。
++void testLeftoverTransactionSafetyNet() {
++    std::cout << "[M16-6] safety net: raw task leaves open transaction -> rolled back\n";
++    Case c("safetynet");
++
++    bool threw = false;
++    try {
++        c.queue.submitAndWait([&] {
++            c.database.begin();                                    // 任务自管事务
++            c.database.ensureEntity("person", "half-written");     // 写一半
++            throw std::runtime_error("fail after partial write");  // 不 rollback 直接失败
++        });
++    } catch (const std::exception&) {
++        threw = true;
++    }
++    CHECK(threw);   // 错误传给调用方
++    // 半写数据被安全网整体回滚
++    CHECK(c.database.scalarQuery(
++              "SELECT count(*) FROM entity WHERE display_name='half-written'") == 0);
++
++    // 队列继续可用：残留事务已清理，后续任务正常执行
++    c.queue.submitAndWait([&] { c.database.ensureEntity("person", "after-net"); });
++    CHECK(c.database.countEntities("person") == 1);
++}
++
+ } // namespace
+ 
+ int main() {
+@@ -186,6 +214,7 @@ int main() {
+     testExceptionAndRollback();
+     testCancel();
+     testShutdownDrain();
++    testLeftoverTransactionSafetyNet();
+ 
+     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
+     if (g_failures > 0) {

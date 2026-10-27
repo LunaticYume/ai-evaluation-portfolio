@@ -1,0 +1,88 @@
+-- The CXX compiler identification is GNU 13.1.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: D:/<QTDIR>/Coding/QT/Tools/mingw1310_64/bin/c++.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (2.0s)
+-- Generating done (0.2s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_C_COMPILER
+
+
+-- Build files have been written to: <EVAL_WS>/work/N01_A/build_eval
+[1/73] Building CXX object CMakeFiles/mgi_core.dir/src/core/TextUtils.cpp.obj
+[2/73] Building CXX object CMakeFiles/mgi_core.dir/src/core/Hashing.cpp.obj
+[3/73] Building CXX object CMakeFiles/mgi_core.dir/src/core/Json.cpp.obj
+[4/73] Building CXX object CMakeFiles/mgi_core.dir/src/tag/TagEngine.cpp.obj
+[5/73] Building CXX object CMakeFiles/mgi_core.dir/src/match/Statistics.cpp.obj
+[6/73] Building CXX object CMakeFiles/mgi_core.dir/src/match/Matcher.cpp.obj
+[7/73] Building CXX object CMakeFiles/mgi_core.dir/src/provider/ProviderService.cpp.obj
+[8/73] Building CXX object CMakeFiles/mgi_core.dir/src/match/BackupService.cpp.obj
+[9/73] Building CXX object CMakeFiles/mgi_core.dir/src/database/WriteQueue.cpp.obj
+[10/73] Building CXX object CMakeFiles/mgi_core.dir/src/status/StateEngine.cpp.obj
+[11/73] Building CXX object CMakeFiles/mgi_core.dir/src/scanner/HashWorker.cpp.obj
+[12/73] Building CXX object CMakeFiles/mgi_core.dir/src/match/DataQuality.cpp.obj
+[13/73] Building CXX object CMakeFiles/mgi_core.dir/src/plugin/PluginSdk.cpp.obj
+[14/73] Building CXX object CMakeFiles/mgi_core.dir/src/view/ViewEngine.cpp.obj
+[15/73] Building CXX object CMakeFiles/mgi_core.dir/src/scanner/AsyncScanController.cpp.obj
+[16/73] Building CXX object CMakeFiles/mgi_core.dir/src/provider/Providers.cpp.obj
+[17/73] Building CXX object CMakeFiles/mgi_core.dir/src/plugin/CsvExportPlugin.cpp.obj
+[18/73] Building CXX object CMakeFiles/mgi_core.dir/src/query/QueryEngine.cpp.obj
+[19/73] Building CXX object CMakeFiles/mgi_core.dir/src/provider/TokenStore.cpp.obj
+[20/73] Building CXX object CMakeFiles/magic_grimoire_index.dir/src/core/app.cpp.obj
+[21/73] Building CXX object CMakeFiles/magic_grimoire_index.dir/src/main.cpp.obj
+[22/73] Building CXX object CMakeFiles/mgi_tests.dir/tests/test_m3_scan.cpp.obj
+[23/73] Building CXX object CMakeFiles/mgi_tests_m9.dir/tests/test_m9_match.cpp.obj
+[24/73] Building CXX object CMakeFiles/mgi_tests_m4.dir/tests/test_m4_state_tag.cpp.obj
+[25/73] Building CXX object CMakeFiles/mgi_tests_m15.dir/tests/test_m15_fingerprint.cpp.obj
+[26/73] Building CXX object CMakeFiles/mgi_tests_m6.dir/tests/test_m6_view.cpp.obj
+[27/73] Building CXX object CMakeFiles/mgi_tests_m14.dir/tests/test_m14_taglib.cpp.obj
+[28/73] Building CXX object CMakeFiles/mgi_core.dir/src/provider/WinHttpTransport.cpp.obj
+[29/73] Building CXX object CMakeFiles/mgi_tests_m8.dir/tests/test_m8_provider.cpp.obj
+[30/73] Building CXX object CMakeFiles/mgi_tests_m5.dir/tests/test_m5_query.cpp.obj
+[31/73] Building CXX object CMakeFiles/mgi_tests_m19.dir/tests/test_m19_quality.cpp.obj
+[32/73] Building CXX object CMakeFiles/mgi_core.dir/src/scanner/MetadataReader.cpp.obj
+[33/73] Building CXX object CMakeFiles/mgi_tests_m10_m11.dir/tests/test_m10_m11.cpp.obj
+[34/73] Building CXX object CMakeFiles/mgi_tests_m18.dir/tests/test_m18_reconciliation.cpp.obj
+[35/73] Building CXX object CMakeFiles/mgi_tests_m21.dir/tests/test_m21_identity.cpp.obj
+[36/73] Building CXX object CMakeFiles/mgi_core.dir/src/database/IndexDatabase.cpp.obj
+[37/73] Building CXX object CMakeFiles/mgi_tests_m16.dir/tests/test_m16_writequeue.cpp.obj
+[38/73] Building CXX object CMakeFiles/mgi_tests_m17.dir/tests/test_m17_async.cpp.obj
+[39/73] Building CXX object CMakeFiles/mgi_tests_m20.dir/tests/test_m20_bangumi.cpp.obj
+[40/73] Building CXX object CMakeFiles/mgi_tests_m26.dir/tests/test_m26_statistics.cpp.obj
+[41/73] Building CXX object CMakeFiles/mgi_tests_m27.dir/tests/test_m27_backup.cpp.obj
+[42/73] Building CXX object CMakeFiles/repro_scan_idempotency.dir/tests/repro_scan_idempotency.cpp.obj
+[43/73] Building CXX object CMakeFiles/mgi_tests_m23_m25.dir/tests/test_m23_m24_m25.cpp.obj
+[44/73] Building CXX object CMakeFiles/mgi_tests_m28.dir/tests/test_m28_plugin_v2.cpp.obj
+[45/73] Building CXX object CMakeFiles/mgi_core.dir/src/scanner/ScanService.cpp.obj
+[46/73] Building CXX object CMakeFiles/repro_scan_paths.dir/tests/repro_scan_paths.cpp.obj
+[47/73] Linking CXX static library libmgi_core.a
+[48/73] Building CXX object CMakeFiles/mgi_tests_m22.dir/tests/test_m22_anime.cpp.obj
+[49/73] Building CXX object CMakeFiles/mgi_tests_trem.dir/tests/test_t2_t8_remediation.cpp.obj
+[50/73] Linking CXX executable mgi_tests_m9.exe
+[51/73] Linking CXX executable mgi_tests_m8.exe
+[52/73] Linking CXX executable magic_grimoire_index.exe
+[53/73] Linking CXX executable mgi_tests.exe
+[54/73] Linking CXX executable mgi_tests_m4.exe
+[55/73] Linking CXX executable mgi_tests_m19.exe
+[56/73] Linking CXX executable mgi_tests_m5.exe
+[57/73] Linking CXX executable mgi_tests_m6.exe
+[58/73] Linking CXX executable mgi_tests_m14.exe
+[59/73] Linking CXX executable mgi_tests_m16.exe
+[60/73] Linking CXX executable mgi_tests_m20.exe
+[61/73] Linking CXX executable mgi_tests_m17.exe
+[62/73] Linking CXX executable mgi_tests_m10_m11.exe
+[63/73] Linking CXX executable mgi_tests_m21.exe
+[64/73] Linking CXX executable mgi_tests_m15.exe
+[65/73] Linking CXX executable mgi_tests_m18.exe
+[66/73] Linking CXX executable mgi_tests_m28.exe
+[67/73] Linking CXX executable mgi_tests_m23_m25.exe
+[68/73] Linking CXX executable mgi_tests_m22.exe
+[69/73] Linking CXX executable mgi_tests_m26.exe
+[70/73] Linking CXX executable mgi_tests_m27.exe
+[71/73] Linking CXX executable mgi_tests_trem.exe
+[72/73] Linking CXX executable repro_scan_idempotency.exe
+[73/73] Linking CXX executable repro_scan_paths.exe

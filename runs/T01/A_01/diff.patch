@@ -1,0 +1,363 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index df2101d..9a32906 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -93,6 +93,7 @@ endmacro()
+ add_library(mgi_core STATIC
+     src/core/Json.cpp
+     src/database/IndexDatabase.cpp
++    src/database/WriteQueue.cpp
+     src/scanner/ScanService.cpp
+     src/scanner/MetadataReader.cpp
+     src/status/StateEngine.cpp
+@@ -172,6 +173,14 @@ target_link_libraries(mgi_tests_m10_m11 PRIVATE mgi_core)
+ mgi_target_common(mgi_tests_m10_m11)
+ add_test(NAME mgi_m10_m11 COMMAND mgi_tests_m10_m11)
+ 
++# ── M16：单写者队列（D020 组件化；并发/优先级/取消/回滚/关闭排空） ─────────────
++add_executable(mgi_tests_m16
++    tests/test_m16_writequeue.cpp
++)
++target_link_libraries(mgi_tests_m16 PRIVATE mgi_core)
++mgi_target_common(mgi_tests_m16)
++add_test(NAME mgi_m16 COMMAND mgi_tests_m16)
++
+ if(ENABLE_TAGLIB)
+     add_executable(mgi_tests_m14
+         tests/test_m14_taglib.cpp
+diff --git a/docs/16-ROADMAP.md b/docs/16-ROADMAP.md
+index a86bfcf..486b174 100644
+--- a/docs/16-ROADMAP.md
++++ b/docs/16-ROADMAP.md
+@@ -110,7 +110,7 @@ M13–M18 基础设施稳定化 → M19–M22 数据质量 + 外部生态 → M2
+ | M13 | Post-M12 收口验收（UNVERIFIED 分类/用户验收/发布标准） | 🔄 进行中（2026-09-06） |
+ | M14 | TagLib 实测 | ✅ 完成（2026-09-06，6 格式 18/18） |
+ | M15 | 内容指纹 | ✅ 完成（2026-09-06，22/22） |
+-| M16 | 单写者队列 | ⬜ |
++| M16 | 单写者队列 | ✅ |
+ | M17 | 异步扫描 | ⬜ |
+ | M18 | 文件系统 Reconciliation | ⬜ |
+ | M19 | 数据质量/去重/合并 | ⬜ |
+diff --git a/docs/CHANGELOG.md b/docs/CHANGELOG.md
+index 64168b4..0cbd222 100644
+--- a/docs/CHANGELOG.md
++++ b/docs/CHANGELOG.md
+@@ -4,6 +4,10 @@
+ 
+ ## [未发布]
+ 
++### 2026-10-28 — M16 单写者队列完成（UNVERIFIED A3 收口，D020 组件化）
++
++新增 `database/WriteQueue`（include/database/WriteQueue.h + src/database/WriteQueue.cpp）：所有写操作收敛到单一写线程串行执行，消除多界面并发写 SQLite 的 "database is locked" 与半截事务。能力：优先级（High>Normal>Low，同优先级 FIFO）；cancellable 任务排队中可 tryCancel（future 正常完成、任务体不执行）；`submitInTransaction` 用 BEGIN IMMEDIATE/COMMIT 包裹，失败整体 ROLLBACK 且原始异常经 future 传回调用方；`shutdown(true)`/析构排空排队任务，关闭后提交抛异常拒绝；Reader 走独立连接（WAL）不被写阻塞。`mgi_tests_m16`（并发一致性/优先级顺序/异常回滚/取消/关闭排空）15/15，连续 10 次无抖动；全量 ctest 8/8 套件通过。
++
+ ### 2026-09-06 — GUI 验收自动化 + M15 内容指纹完成
+ 
+ **GUI 验收自动化**（应用户要求替代人工验收的功能部分）：`mgi_gui` 静态库抽出；`mgi_tests_gui`（offscreen，44/44）覆盖 USER_ACCEPTANCE §1–§5 功能项：启动扫描/8 页签/幂等重扫、编辑器只列合法转换、状态修改即时可见、显示全部切换、标签继承* 角标、中文显示、图构建与点击选中（修复"只有点中文本可选中"的真实缺陷）、详情内容、搜索命中/空结果、扫描不覆盖用户状态、迁移备份安全网。MainWindow 增加 db 路径参数与 runSearch 公共入口。
+diff --git a/docs/UNVERIFIED_REGISTER.md b/docs/UNVERIFIED_REGISTER.md
+index 0bcc0a5..7059df4 100644
+--- a/docs/UNVERIFIED_REGISTER.md
++++ b/docs/UNVERIFIED_REGISTER.md
+@@ -8,7 +8,7 @@
+ | --- | --- | --- | --- | --- |
+ | A1 | R103 TagLib 实际标签解析（MP3/FLAC/OGG/Opus/M4A/WAV） | **M14** | ✅ **CLOSED**（2026-09-06） | TagLib 2.0.2 vendor（third_party/taglib）；6 格式真实样本（ffmpeg 生成、含标签）全管线验证：FILE_TAG/display_artist Claim、tag_parsed=1、音频技术元数据、tag_json 留档、同曲多格式归并同一 Recording（D007）、FILE_TAG 不覆盖 USER 有效值（R902）、损坏文件降级不阻断（mgi_tests_m14 18/18）。遗留：DSF/DFF 等小众格式按需扩展（D014 原文） |
+ | A2 | 内容指纹（D017 后半：哈希计算/缓存/移动判定强化） | **M15** | ✅ **CLOSED**（2026-09-06） | sha256 流式实现（core/Hashing）；新文件/内容变化即时计算（512MB 上限，超限后台策略）+ `backfillHashes` 补算；移动匹配二级确认：指纹不一致直接排除候选，一致则 `verified:1, hash_confirmed:1`（mgi_tests_m15 22/22）。遗留：真正后台空闲调度随 M16/M17 线程基础设施落地 |
+-| A3 | 单写者队列（多线程写一致性，D020 组件化） | M16 | 待开始 | 队列组件 + 并发 Reader/Writer 测试 |
++| A3 | 单写者队列（多线程写一致性，D020 组件化） | M16 | ✅ **CLOSED**（2026-10-28） | `database/WriteQueue`（单写线程串行执行、High>Normal>Low 优先级+FIFO、cancellable 任务 tryCancel、submitInTransaction 失败整体 ROLLBACK+异常经 future 传回、shutdown(drain)/析构排空、关闭后拒绝提交）；`mgi_tests_m16` 15/15（并发一致性/优先级顺序/回滚/取消/关闭排空），连续 10 次无抖动；全量 ctest 8/8 |
+ | A4 | 异步扫描（GUI 不阻塞、取消语义） | M17 | 依赖 A3 | 异步 Scanner + 取消/暂停/进度测试 |
+ | A5 | 文件系统 Reconciliation（复制/重复/失效路径识别） | M18 | 待开始 | Reconcile Report + 连续扫描零重复断言 |
+ | A6 | CAA 实网封面获取 | M20+ | 待开始 | live smoke 扩展真实 MBID getArtworkUrls |
+diff --git a/include/database/WriteQueue.h b/include/database/WriteQueue.h
+new file mode 100644
+index 0000000..4bb6057
+--- /dev/null
++++ b/include/database/WriteQueue.h
+@@ -0,0 +1,112 @@
++#pragma once
++
++// WriteQueue — M16 单写者队列（D020 组件化，13-ARCHITECTURE A5）。
++//
++// 问题背景：多个界面操作同时写 SQLite 时偶发 "database is locked"，且失败后
++// 事务只写入一半需要手工修复。本组件把所有写操作收敛到单一写线程串行执行，
++// 写连接上 BEGIN IMMEDIATE + busy_timeout 保证不再出现锁竞争。
++//
++// 语义（M16 验收 + agent_prompts/post_m12/M16.md）：
++//  - 多 Reader（独立 IndexDatabase 连接，WAL）+ 单一 Writer（本队列持有写连接）。
++//  - 所有写入任务排队后串行执行；同一时刻最多一个任务在写库。
++//  - 优先级：High > Normal > Low；同优先级按提交顺序 FIFO。
++//  - 可取消：submit(..., /*cancellable=*/true) 的任务在尚未开始执行前可被
++//    tryCancel(taskId) 跳过（future 正常完成，任务体不执行）。
++//  - 事务整体回滚：submitInTransaction 把任务包进 begin/commit，任务抛异常时
++//    ROLLBACK 并把原始异常通过 future 传回调用方；队列继续可用。
++//  - 关闭排空：shutdown(true)/析构先执行完所有排队任务再退出；
++//    关闭后 submit 抛 std::runtime_error 拒绝新任务。
++//
++// 红线：禁止绕过本队列多线程直写 IndexDatabase 的写连接；只有写线程执行任务体。
++
++#include "database/IndexDatabase.h"
++
++#include <atomic>
++#include <condition_variable>
++#include <cstdint>
++#include <functional>
++#include <future>
++#include <memory>
++#include <mutex>
++#include <stdexcept>
++#include <string>
++#include <thread>
++#include <vector>
++
++namespace mgi {
++
++class WriteQueue {
++public:
++    // 任务优先级：数值越大越先执行；同优先级 FIFO。
++    enum class Priority { Low = 0, Normal = 1, High = 2 };
++
++    // 持有唯一写连接；构造即启动写线程。
++    explicit WriteQueue(IndexDatabase& database);
++    // 析构 = shutdown(true)：排空所有排队任务后退出（程序退出时队列排空）。
++    ~WriteQueue();
++
++    WriteQueue(const WriteQueue&) = delete;
++    WriteQueue& operator=(const WriteQueue&) = delete;
++
++    // 仅允许在任务体内部使用（写线程上执行）；禁止其他线程直写。
++    IndexDatabase& writer() { return database_; }
++
++    // 提交任务（不自动开事务）。cancellable=true 时任务在排队中可被 tryCancel 跳过。
++    // 队列已关闭（shutdown 后）时抛 std::runtime_error。
++    std::future<void> submit(std::function<void()> task,
++                             Priority priority = Priority::Normal,
++                             bool cancellable = false);
++
++    // submit().get() 的阻塞便捷形式；任务抛出的异常原样重抛给调用方。
++    void submitAndWait(std::function<void()> task,
++                       Priority priority = Priority::Normal,
++                       bool cancellable = false);
++
++    // 事务任务：begin → task → commit；task 或 commit 抛异常时整体 ROLLBACK，
++    // 原始异常经 future 传回调用方；数据库不留半截写入。
++    std::future<void> submitInTransaction(std::function<void()> task,
++                                          Priority priority = Priority::Normal);
++
++    // 取消一个仍在排队中且以 cancellable=true 提交的任务。
++    // 返回 false：任务不存在 / 已开始执行 / 已完成 / 非 cancellable。
++    bool tryCancel(uint64_t taskId);
++
++    // 阻塞直到所有排队任务执行完毕（写线程空闲且队列空）。
++    void drain();
++
++    // 关闭队列。drainPending=true：先执行完排队任务；false：丢弃排队任务，
++    // 其 future 以 std::runtime_error 结束。关闭后 submit 一律抛异常。
++    void shutdown(bool drainPending);
++
++    // 测试与诊断：下一个将分配的任务 id（上一个已提交任务的 id = 返回值-1）。
++    uint64_t nextIdForTest();
++
++private:
++    struct Task {
++        uint64_t id{0};
++        Priority priority{Priority::Normal};
++        bool cancellable{false};
++        std::atomic<bool> cancelled{false};
++        std::function<void()> fn;
++        std::shared_ptr<std::promise<void>> promise;
++    };
++    using TaskPtr = std::shared_ptr<Task>;
++
++    void workerLoop();
++    TaskPtr popTopLocked();   // 须持 mutex_：取优先级最高（同优先级 id 最小）的任务
++    void shutdownLocked(bool drainPending); // 须持 mutex_
++
++    IndexDatabase& database_;
++    std::thread worker_;
++
++    std::mutex mutex_;
++    std::condition_variable cv_;          // 写线程等待 + drain 等待共用
++    std::vector<TaskPtr> pending_;        // 排队任务（小规模，线性取最优即可）
++    uint64_t nextId_{1};
++    bool busy_{false};                    // 写线程正在执行任务
++    bool drainRequested_{false};          // shutdown(drainPending=true) 已请求
++    bool dropRequested_{false};           // shutdown(drainPending=false) 已请求
++    bool shutdownDone_{false};            // 写线程已退出
++};
++
++} // namespace mgi
+diff --git a/src/database/WriteQueue.cpp b/src/database/WriteQueue.cpp
+new file mode 100644
+index 0000000..a31f76b
+--- /dev/null
++++ b/src/database/WriteQueue.cpp
+@@ -0,0 +1,171 @@
++// WriteQueue 实现 — M16 单写者队列（D020/A5）。语义见 include/database/WriteQueue.h。
++
++#include "database/WriteQueue.h"
++
++namespace mgi {
++
++WriteQueue::WriteQueue(IndexDatabase& database) : database_(database) {
++    worker_ = std::thread([this] { workerLoop(); });
++}
++
++WriteQueue::~WriteQueue() {
++    // 程序退出路径：排空所有排队任务，保证数据不丢。
++    shutdown(true);
++}
++
++std::future<void> WriteQueue::submit(std::function<void()> task, Priority priority,
++                                     bool cancellable) {
++    auto t = std::make_shared<Task>();
++    auto promise = std::make_shared<std::promise<void>>();
++    std::future<void> future = promise->get_future();
++    t->fn = std::move(task);
++    t->priority = priority;
++    t->cancellable = cancellable;
++    t->promise = std::move(promise);
++
++    {
++        std::lock_guard<std::mutex> lock(mutex_);
++        if (drainRequested_ || dropRequested_ || shutdownDone_) {
++            throw std::runtime_error("WriteQueue: queue is shut down; task rejected");
++        }
++        t->id = nextId_++;
++        pending_.push_back(t);
++    }
++    cv_.notify_one();
++    return future;
++}
++
++void WriteQueue::submitAndWait(std::function<void()> task, Priority priority, bool cancellable) {
++    submit(std::move(task), priority, cancellable).get();   // 异常原样重抛
++}
++
++std::future<void> WriteQueue::submitInTransaction(std::function<void()> task, Priority priority) {
++    IndexDatabase& db = database_;
++    std::function<void()> wrapped = [task = std::move(task), &db] {
++        db.begin();   // BEGIN IMMEDIATE：写线程上独占写锁
++        try {
++            task();
++            db.commit();
++        } catch (...) {
++            // 整体回滚，不留半截写入；回滚失败不吞掉原始异常。
++            try {
++                db.rollback();
++            } catch (...) {
++            }
++            throw;
++        }
++    };
++    return submit(std::move(wrapped), priority);
++}
++
++bool WriteQueue::tryCancel(uint64_t taskId) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    for (const TaskPtr& t : pending_) {
++        if (t->id == taskId) {
++            if (!t->cancellable || t->cancelled.load()) {
++                return false;
++            }
++            t->cancelled.store(true);
++            return true;
++        }
++    }
++    return false;   // 不在排队中（已开始执行/已完成/不存在）
++}
++
++void WriteQueue::drain() {
++    std::unique_lock<std::mutex> lock(mutex_);
++    cv_.wait(lock, [this] { return pending_.empty() && !busy_; });
++}
++
++void WriteQueue::shutdown(bool drainPending) {
++    {
++        std::lock_guard<std::mutex> lock(mutex_);
++        shutdownLocked(drainPending);
++    }
++    cv_.notify_all();
++    if (worker_.joinable()) {
++        worker_.join();
++    }
++}
++
++uint64_t WriteQueue::nextIdForTest() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    return nextId_;
++}
++
++// ── 内部 ──────────────────────────────────────────────────────────────────────
++
++void WriteQueue::shutdownLocked(bool drainPending) {
++    if (drainPending) {
++        if (!drainRequested_) {
++            drainRequested_ = true;   // 写线程继续执行到队列空后自然退出
++        }
++        return;
++    }
++    if (dropRequested_) {
++        return;
++    }
++    dropRequested_ = true;
++    auto error = std::make_exception_ptr(
++        std::runtime_error("WriteQueue: task dropped by shutdown(drainPending=false)"));
++    for (const TaskPtr& t : pending_) {
++        t->promise->set_exception(error);
++    }
++    pending_.clear();
++}
++
++WriteQueue::TaskPtr WriteQueue::popTopLocked() {
++    // 优先级最高（High>Normal>Low）优先；同优先级取 id 最小（FIFO）。
++    auto best = pending_.begin();
++    for (auto it = pending_.begin(); it != pending_.end(); ++it) {
++        const TaskPtr& b = *best;
++        const TaskPtr& c = *it;
++        if (static_cast<int>(c->priority) > static_cast<int>(b->priority) ||
++            (c->priority == b->priority && c->id < b->id)) {
++            best = it;
++        }
++    }
++    TaskPtr task = *best;
++    pending_.erase(best);
++    return task;
++}
++
++void WriteQueue::workerLoop() {
++    for (;;) {
++        TaskPtr task;
++        {
++            std::unique_lock<std::mutex> lock(mutex_);
++            cv_.wait(lock, [this] {
++                return !pending_.empty() || dropRequested_ ||
++                       (drainRequested_ && pending_.empty());
++            });
++            if (pending_.empty()) {
++                // drainRequested_：已排空；dropRequested_：已丢弃。写线程退出。
++                shutdownDone_ = true;
++                cv_.notify_all();
++                return;
++            }
++            task = popTopLocked();
++            busy_ = true;
++        }
++
++        if (task->cancelled.load()) {
++            task->promise->set_value();   // 被取消：跳过执行，future 正常完成
++        } else {
++            try {
++                task->fn();
++                task->promise->set_value();
++            } catch (...) {
++                task->promise->set_exception(std::current_exception());
++            }
++        }
++
++        {
++            std::lock_guard<std::mutex> lock(mutex_);
++            busy_ = false;
++        }
++        cv_.notify_all();   // 唤醒 drain() 与（如已请求关闭的）退出判定
++    }
++}
++
++} // namespace mgi

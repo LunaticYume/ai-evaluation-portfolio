@@ -95,10 +95,10 @@ gold     = 该 commit 本身（客观答案）
 
 ## 4. 结果
 
-> **状态：0 次运行待执行（`results.csv` 目前只有表头）。**
+> **状态：首批 4 次运行已入账（2026-10-28）——T01（功能）与 N01（负控制）× Agent A/B，台账与运行证据见 `results.csv` 与 `runs/`。**
 > 这一节在跑完后填入，不做预估。
 
-计划规模：先跑 **2 条任务 × 2 个 Agent = 4 次**（跑通流程再扩量，不追求一次跑满 19 条）；如实记录，不凑数。
+首批已按此规模执行；扩量前先产出 Bad Case 与 LLM-as-a-Judge 一致性分析。
 
 运行记录怎么交、怎么存、怎么判，见 [`runs/README.md`](runs/README.md) 与 [`CHECKLIST.md`](CHECKLIST.md)；台账一致性用 `python scripts/validate_results.py` 校验。
 

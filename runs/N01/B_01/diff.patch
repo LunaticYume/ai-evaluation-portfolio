@@ -1,0 +1,484 @@
+diff --git a/fuzz_idem.cpp b/fuzz_idem.cpp
+new file mode 100644
+index 0000000..199a61a
+--- /dev/null
++++ b/fuzz_idem.cpp
+@@ -0,0 +1,294 @@
++// fuzz_idem — 差分压测：同一目录多轮扫描，库状态必须逐轮一致（幂等）。
++// 用法: fuzz_idem.exe <seedBase> <rounds>
++// 每轮: 随机树 → 扫S1 → 扫S2(无变化) → 变异 → 扫S3 → 扫S4(无变化)
++// 断言: S1==S2 的库状态、S2 计数全零；S3==S4 的库状态、S4 计数全零。
++#include "database/IndexDatabase.h"
++#include "scanner/ScanService.h"
++#include "scanner/MetadataReader.h"
++#include "status/StateEngine.h"
++
++#include <algorithm>
++#include <filesystem>
++#include <fstream>
++#include <iostream>
++#include <random>
++#include <thread>
++#include <chrono>
++#include <sstream>
++#include <string>
++#include <vector>
++
++namespace fs = std::filesystem;
++using namespace mgi;
++
++namespace {
++
++struct CaseEnv {
++    fs::path base;
++    fs::path root;
++    fs::path db;
++};
++
++CaseEnv makeEnv(int seed) {
++    CaseEnv env;
++    env.base = fs::temp_directory_path() / "mgi_fuzz_idem" / ("s" + std::to_string(seed));
++    std::error_code ec;
++    fs::remove_all(env.base, ec);
++    fs::create_directories(env.base);
++    env.root = env.base / "music";
++    env.db = env.base / "lib.db";
++    fs::create_directories(env.root);
++    return env;
++}
++
++const char* kExt[] = {".flac", ".mp3", ".wav", ".m4a", ".ogg"};
++const char* kFolder[] = {"Alpha", "Beta", "Gamma", "德尔塔", "Epsilon", "Zeta", "杂项", "Live"};
++
++std::string pad(int v, int width) {
++    std::string s = std::to_string(v);
++    while ((int)s.size() < width) s.insert(s.begin(), '0');
++    return s;
++}
++
++// 随机树：子目录树 + 音频文件（同名跨目录 / 同内容 / 0字节 / 大小写混合）
++void buildTree(CaseEnv& env, std::mt19937& rng) {
++    const int folderCount = 8 + (int)(rng() % 22);
++    std::vector<fs::path> dirs{env.root};
++    for (int i = 0; i < folderCount; ++i) {
++        std::uniform_int_distribution<size_t> pick(0, dirs.size() - 1);
++        fs::path parent = dirs[pick(rng)];
++        if (parent.string().size() > env.root.string().size() + 60) continue; // 限深
++        fs::path dir = parent / (kFolder[rng() % 8] + pad(i % 13, 2));
++        fs::create_directories(dir);
++        dirs.push_back(dir);
++    }
++    const int fileCount = 200 + (int)(rng() % 500);
++    for (int i = 0; i < fileCount; ++i) {
++        std::uniform_int_distribution<size_t> pick(0, dirs.size() - 1);
++        fs::path dir = dirs[pick(rng)];
++        std::string stem = pad(1 + i % 12, 2) + " - track" + pad(i % 17, 2);
++        std::string ext = kExt[rng() % 5];
++        std::string content = (rng() % 5 == 0) ? "shared-content-blob"
++                                               : "content-" + std::to_string(i) + "-" + std::to_string(rng());
++        if (rng() % 10 == 0) content = ""; // 0 字节
++        std::ofstream f(dir / (stem + ext), std::ios::binary);
++        f << content;
++    }
++}
++
++std::string dumpState(IndexDatabase& db, Id scanRootId) {
++    std::ostringstream out;
++    auto q = [&db, &out](const std::string& sql, const std::string& tag) {
++        out << "==== " << tag << "\n";
++        for (auto& row : db.queryRows(sql)) {
++            for (auto& cell : row) out << cell << "|";
++            out << "\n";
++        }
++    };
++    const std::string root = std::to_string(scanRootId);
++    q("SELECT fo.rel_path, f.filename, f.size_bytes, f.mtime_ms, f.missing_since IS NOT NULL, "
++      "COALESCE(f.recording_id,0), COALESCE(f.content_hash,''), f.tag_parsed "
++      "FROM file f JOIN folder fo ON fo.entity_id=f.folder_id WHERE fo.scan_root_id=" + root +
++      " ORDER BY fo.rel_path, f.filename COLLATE BINARY", "files");
++    q("SELECT f.rel_path, f.depth, f.missing_since IS NOT NULL, f.parent_folder_id "
++      "FROM folder f WHERE f.scan_root_id=" + root + " ORDER BY f.rel_path COLLATE BINARY", "folders");
++    q("SELECT e.id, e.display_name FROM entity e WHERE e.entity_type='recording' ORDER BY e.id",
++      "recordings");
++    q("SELECT c.entity_id, c.field_name, c.value_text, c.source, c.source_detail, c.confidence "
++      "FROM field_claim c ORDER BY c.entity_id, c.field_name, c.value_text", "claims");
++    q("SELECT r.source_entity_id, r.target_entity_id, t.key, r.source, r.attributes_json "
++      "FROM relationship r JOIN relationship_type t ON t.id=r.type_id ORDER BY r.id", "relationships");
++    q("SELECT a.entity_id, a.category_key, d.key, a.source FROM status_assignment a "
++      "JOIN status_definition d ON d.id=a.status_id ORDER BY a.entity_id, a.category_key, d.key, a.source",
++      "statuses");
++    q("SELECT count(*) FROM file f JOIN folder fo ON fo.entity_id=f.folder_id "
++      "WHERE fo.scan_root_id=" + root + " AND f.missing_since IS NULL", "present_files");
++    return out.str();
++}
++
++void mutations(CaseEnv& env, std::mt19937& rng, std::vector<std::string>& log) {
++    // 收集现有文件与目录
++    std::vector<fs::path> files, dirs;
++    for (auto& e : fs::recursive_directory_iterator(env.root)) {
++        std::error_code ec;
++        if (e.is_regular_file(ec) && !ec) files.push_back(e.path());
++        else if (e.is_directory(ec) && !ec) dirs.push_back(e.path());
++    }
++    if (files.empty()) return;
++    static int opSeq = 0; // 跨 seed 唯一，避免目标名撞车
++    const int ops = 3 + (int)(rng() % 6);
++    for (int i = 0; i < ops && !files.empty(); ++i) {
++        std::uniform_int_distribution<size_t> pick(0, files.size() - 1);
++        fs::path f = files[pick(rng)];
++        std::error_code ec;
++        switch (rng() % 7) {
++            case 0: { // 重命名
++                fs::path nf = f.parent_path() / ("renamed_" + std::to_string(++opSeq) +
++                                                 f.extension().string());
++                fs::rename(f, nf, ec);
++                if (ec) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); ec.clear(); fs::rename(f, nf, ec); }
++                if (!ec) { files[pick(rng)] = nf; log.push_back("rename " + f.filename().string()); }
++                break;
++            }
++            case 1: { // 移动
++                if (dirs.empty()) break;
++                std::uniform_int_distribution<size_t> dpick(0, dirs.size() - 1);
++                fs::path nf = dirs[dpick(rng)] / f.filename();
++                if (fs::exists(nf)) break;
++                fs::rename(f, nf, ec);
++                if (ec) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); ec.clear(); fs::rename(f, nf, ec); }
++                if (!ec) { files[pick(rng)] = nf; log.push_back("move " + f.filename().string()); }
++                break;
++            }
++            case 2: { // 删除
++                fs::remove(f, ec);
++                if (ec) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); ec.clear(); fs::remove(f, ec); }
++                if (!ec) { files.erase(files.begin() + (size_t)(rng() % files.size())); log.push_back("delete " + f.filename().string()); }
++                break;
++            }
++            case 3: { // 内容修改（同 mtime 附近）
++                std::ofstream out(f, std::ios::binary | std::ios::trunc);
++                out << "mutated-" << ++opSeq;
++                out.close();
++                log.push_back("rewrite " + f.filename().string());
++                break;
++            }
++            case 4: { // 新增
++                std::uniform_int_distribution<size_t> dpick(0, dirs.size() - 1);
++                fs::path nf = dirs[dpick(rng)] / ("new_" + std::to_string(++opSeq) + kExt[rng() % 5]);
++                std::ofstream out(nf, std::ios::binary);
++                out << "brand-new-" << ++opSeq;
++                out.close();
++                files.push_back(nf);
++                log.push_back("add " + nf.filename().string());
++                break;
++            }
++            case 5: { // 目录重命名（含文件 → 触发 FOLDER_RENAMED 对账）
++                if (dirs.size() < 2) break;
++                std::uniform_int_distribution<size_t> dpick(1, dirs.size() - 1);
++                fs::path d = dirs[dpick(rng)];
++                if (d == env.root) break;
++                fs::path nd = d.parent_path() / ("dir_renamed_" + std::to_string(++opSeq));
++                ec.clear();
++                fs::rename(d, nd, ec);
++                if (ec) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); ec.clear(); fs::rename(d, nd, ec); }
++                if (!ec) {
++                    const std::string os = d.string() + "\\";
++                    for (auto& p : files)
++                        if (p.string().rfind(os, 0) == 0) p = nd / p.string().substr(os.size());
++                    for (auto& p : dirs)
++                        if (p.string().rfind(os, 0) == 0) p = nd / p.string().substr(os.size());
++                    std::replace(dirs.begin(), dirs.end(), d, nd);
++                    log.push_back("dirrename " + d.filename().string());
++                }
++                break;
++            }
++            case 6: { // 删除目录（连同其中文件）
++                if (dirs.size() < 2) break;
++                std::uniform_int_distribution<size_t> dpick(1, dirs.size() - 1);
++                fs::path d = dirs[dpick(rng)];
++                if (d == env.root) break;
++                ec.clear();
++                fs::remove_all(d, ec);
++                if (ec) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); ec.clear(); fs::remove_all(d, ec); }
++                if (!ec) {
++                    const std::string os = d.string() + "\\";
++                    files.erase(std::remove_if(files.begin(), files.end(),
++                                   [&](const fs::path& p) { return p.string().rfind(os, 0) == 0; }),
++                                files.end());
++                    dirs.erase(std::remove(dirs.begin(), dirs.end(), d), dirs.end());
++                    log.push_back("deldir " + d.filename().string());
++                }
++                break;
++            }
++        }
++    }
++}
++
++int runSeed(int seed) {
++    auto env = makeEnv(seed);
++    std::mt19937 rng(static_cast<unsigned>(seed) * 7919u + 13u);
++    buildTree(env, rng);
++
++    bool ok = true;
++    std::string d1, d2, d3, d4;
++    std::vector<std::string> log;
++    {
++        IndexDatabase db(env.db);
++        db.migrate();
++    StateEngine engine(db);
++    MetadataReader reader;
++    ScanService scanner(db, engine, reader);
++
++    auto scan = [&](const char* tag, ScanOutcome& o) {
++        o = scanner.scanRoot(env.root, "fuzz");
++        std::cout << "seed " << seed << " " << tag << ": fa=" << o.filesAdded
++                  << " fr=" << o.filesRemoved << " fc=" << o.filesChanged
++                  << " fm=" << o.filesMoved << " fn=" << o.filesRenamed
++                  << " foa=" << o.foldersAdded << " for=" << o.foldersRemoved
++                  << " forn=" << o.foldersRenamed << " err=" << o.errors << "\n";
++    };
++
++    ScanOutcome s1, s2, s3, s4;
++    scan("S1", s1);
++    scan("S2", s2);
++    d1 = dumpState(db, s1.scanRootId);
++    d2 = dumpState(db, s2.scanRootId);
++    const bool s2Clean = s2.filesAdded == 0 && s2.filesRemoved == 0 && s2.filesChanged == 0 &&
++                         s2.filesMoved == 0 && s2.filesRenamed == 0 &&
++                         s2.foldersAdded == 0 && s2.foldersRemoved == 0 && s2.foldersRenamed == 0;
++    if (!s2Clean) {
++        std::cout << "seed " << seed << " FAIL: S2 counters not clean\n";
++        ok = false;
++    }
++    if (d1 != d2) {
++        std::cout << "seed " << seed << " FAIL: S1/S2 state diverged\n";
++        ok = false;
++    }
++
++    mutations(env, rng, log);
++    scan("S3", s3);
++    scan("S4", s4);
++    d3 = dumpState(db, s3.scanRootId);
++    d4 = dumpState(db, s4.scanRootId);
++    const bool s4Clean = s4.filesAdded == 0 && s4.filesRemoved == 0 && s4.filesChanged == 0 &&
++                         s4.filesMoved == 0 && s4.filesRenamed == 0 &&
++                         s4.foldersAdded == 0 && s4.foldersRemoved == 0 && s4.foldersRenamed == 0;
++    if (!s4Clean) {
++        std::cout << "seed " << seed << " FAIL: S4 counters not clean\n";
++        ok = false;
++    }
++    if (d3 != d4) {
++        std::cout << "seed " << seed << " FAIL: S3/S4 state diverged\n";
++        ok = false;
++    }
++    } // db 关闭
++
++    if (!ok) {
++        std::cout << "seed " << seed << " mutations:";
++        for (auto& l : log) std::cout << " [" << l << "]";
++        std::cout << "\n";
++        // 落盘两个 dump 供排查
++        std::ofstream(env.base / "d1.txt") << d1;
++        std::ofstream(env.base / "d2.txt") << d2;
++        std::ofstream(env.base / "d3.txt") << d3;
++        std::ofstream(env.base / "d4.txt") << d4;
++        std::cout << "seed " << seed << " dumps at " << env.base.string() << "\n";
++        return 1;
++    }
++    fs::remove_all(env.base);
++    return 0;
++}
++
++} // namespace
++
++int main(int argc, char** argv) {
++    const int seedBase = argc > 1 ? std::atoi(argv[1]) : 1;
++    const int rounds = argc > 2 ? std::atoi(argv[2]) : 20;
++    int failures = 0;
++    for (int i = 0; i < rounds; ++i) {
++        failures += runSeed(seedBase + i);
++    }
++    std::cout << (rounds - failures) << "/" << rounds << " seeds idempotent\n";
++    return failures == 0 ? 0 : 1;
++}
+diff --git a/src/scanner/ScanService.cpp b/src/scanner/ScanService.cpp
+index c94b55d..eefb533 100644
+--- a/src/scanner/ScanService.cpp
++++ b/src/scanner/ScanService.cpp
+@@ -30,6 +30,10 @@ std::optional<std::string> hashFileIfWithinCap(const std::filesystem::path& path
+     return hash;
+ }   // 09-SCAN_IMPORT_SPEC §6：每 500 文件级操作一事务
+ constexpr std::int64_t kMtimeToleranceMs = 10000; // 09 §3：mtime_ms 相近判定容差
++// MinGW/libstdc++ 下 directory_entry::last_write_time 存在整秒量化且 floor/round 不稳定
++// （同一未改动文件两次读取可相差 ±1000ms）。指纹比较须容忍该抖动，否则重扫产生幻影
++// FILE_CHANGED、永不收敛（09 §4：重复扫描事件=无变化）。
++constexpr std::int64_t kMtimeJitterToleranceMs = 2000;
+ 
+ std::string toPosixRel(const std::filesystem::path& path) {
+     if (path.empty()) {
+@@ -406,6 +410,25 @@ ScanOutcome ScanService::scanRoot(const std::filesystem::path& rootPath,
+         std::sort(signature.begin(), signature.end());
+         return signature;
+     };
++    // 签名相等（mtime 按容差比较）：磁盘枚举的 mtime 有整秒量化抖动（见
++    // kMtimeJitterToleranceMs），精确比较会让文件夹重命名误判为增删，进而把
++    // 完好文件误送入移动候选池。排序键以 within 为主，逐位配对安全。
++    auto signatureMatches =
++        [&](const std::vector<std::tuple<std::string, long long, std::int64_t>>& dbSignature,
++            const std::vector<std::tuple<std::string, long long, std::int64_t>>& diskSignature) {
++            if (dbSignature.size() != diskSignature.size()) {
++                return false;
++            }
++            for (std::size_t i = 0; i < dbSignature.size(); ++i) {
++                if (std::get<0>(dbSignature[i]) != std::get<0>(diskSignature[i]) ||
++                    std::get<1>(dbSignature[i]) != std::get<1>(diskSignature[i]) ||
++                    std::llabs(std::get<2>(dbSignature[i]) - std::get<2>(diskSignature[i])) >
++                        kMtimeToleranceMs) {
++                    return false;
++                }
++            }
++            return true;
++        };
+ 
+     // ── 文件夹重命名对账（T-SCAN-06：重命名保留 Folder 实体与全部挂接） ─────
+     // M3 启发式（09 §3，无内容哈希 → UNVERIFIED）：消失文件夹与磁盘新文件夹的
+@@ -459,7 +482,7 @@ ScanOutcome ScanService::scanRoot(const std::filesystem::path& rootPath,
+                 if (!parentChainOk) {
+                     continue;
+                 }
+-                if (subtreeSignatureFromDisk(newRel) != goneSignature) {
++                if (!signatureMatches(goneSignature, subtreeSignatureFromDisk(newRel))) {
+                     continue;
+                 }
+ 
+@@ -672,6 +695,13 @@ ScanOutcome ScanService::scanRoot(const std::filesystem::path& rootPath,
+             const bool hashConfirmed = goneRow.contentHash.has_value(); // 候选已过哈希比对
+             db_.renameFile(goneRow.entityId, folderRowIt->second.entityId, newFilename,
+                            std::filesystem::path(newFilename).extension().string());
++            // 移动/重命名匹配的 mtime 门限是 ±kMtimeToleranceMs：沿用旧行指纹（最多旧
++            // 10s）会让下次扫描的精确比较误报 FILE_CHANGED。对上的磁盘文件即观察到的
++            // 物理事实，这里把指纹对齐到磁盘观察值。
++            const DiskFile& matchedDiskFile = diskFilesByKey.at(bestDiskKey);
++            db_.updateFileFingerprint(goneRow.entityId,
++                                      static_cast<long long>(matchedDiskFile.size),
++                                      matchedDiskFile.mtimeMs);
+             if (goneRow.missingSince.has_value()) {
+                 db_.clearFileMissing(goneRow.entityId, outcome.sessionId);
+             }
+@@ -727,10 +757,13 @@ ScanOutcome ScanService::scanRoot(const std::filesystem::path& rootPath,
+             const auto existingIt = dbFilesByKey.find(diskKey);
+             if (existingIt != dbFilesByKey.end()) {
+                 const FileRow& row = existingIt->second;
+-                const bool fingerprintChanged =
+-                    !row.sizeBytes.has_value() || !row.mtimeMs.has_value() ||
+-                    static_cast<long long>(diskFile.size) != *row.sizeBytes ||
+-                    diskFile.mtimeMs != *row.mtimeMs;
++                const bool sizeChanged =
++                    !row.sizeBytes.has_value() ||
++                    static_cast<long long>(diskFile.size) != *row.sizeBytes;
++                const bool mtimeChanged =
++                    !row.mtimeMs.has_value() ||
++                    std::llabs(diskFile.mtimeMs - *row.mtimeMs) > kMtimeJitterToleranceMs;
++                const bool fingerprintChanged = sizeChanged || mtimeChanged;
+ 
+                 if (row.missingSince.has_value()) {
+                     db_.clearFileMissing(row.entityId, outcome.sessionId);
+@@ -756,6 +789,12 @@ ScanOutcome ScanService::scanRoot(const std::filesystem::path& rootPath,
+                     db_.addScanEvent(outcome.sessionId, "FILE_CHANGED", row.entityId,
+                                      folderRel + "/" + filename, "{}");
+                     ++outcome.filesChanged;
++                } else if (row.mtimeMs.has_value() && diskFile.mtimeMs != *row.mtimeMs) {
++                    // size 相同、mtime 差 ≤ 抖动容差（整秒量化 floor/round 抖动）：
++                    // 静默对齐指纹，不产生 CHANGED 事件（09 §4 幂等；内容未变，哈希不重算）
++                    db_.updateFileFingerprint(row.entityId,
++                                              static_cast<long long>(diskFile.size),
++                                              diskFile.mtimeMs);
+                 }
+                 continue;
+             }
+diff --git a/tests/test_m3_scan.cpp b/tests/test_m3_scan.cpp
+index 9c3c177..9582169 100644
+--- a/tests/test_m3_scan.cpp
++++ b/tests/test_m3_scan.cpp
+@@ -8,6 +8,7 @@
+ #include "status/StateEngine.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <filesystem>
+ #include <fstream>
+ #include <iostream>
+@@ -332,6 +333,68 @@ void testRootUnavailable() {
+     CHECK(third.filesAdded == 0); // 文件未丢，无需复活
+ }
+ 
++// ── T-SCAN-08：mtime 整秒量化抖动不产生幻影事件（09 §4 幂等） ──
++// MinGW/libstdc++ 的 directory_entry::last_write_time 存在 floor/round 不稳定的整秒
++// 量化：同一未改动文件的 mtime 两次读取可相差 ±1000ms。回归覆盖：
++//   1) 同 size、mtime 微移（±1s）→ 无 CHANGED 事件、计数全零、重扫收敛；
++//   2) 文件夹重命名 + 内部文件 mtime 微移 → 签名对账仍识别为 FOLDER_RENAMED，
++//      不降级为增删（降级会把完好文件送进移动候选池、被误配）。
++void testScanMtimeJitterIdempotent() {
++    std::cout << "[T-SCAN-08] mtime jitter tolerated, rescan stays clean\n";
++    Case test("mtime_jitter");
++
++    // 1) 文件级：mtime 微移
++    const auto filePath = test.root / "album" / "01 - song.flac";
++    writeFile(filePath, "audio-bytes");
++    test.scanner.scanRoot(test.root);
++
++    const auto bumped = fs::last_write_time(filePath) + std::chrono::milliseconds(1000);
++    fs::last_write_time(filePath, bumped);
++
++    const auto second = test.scanner.scanRoot(test.root);
++    CHECK(second.rootAvailable);
++    CHECK(second.filesChanged == 0);
++    CHECK(second.filesAdded == 0 && second.filesRemoved == 0);
++    CHECK(second.filesMoved == 0 && second.filesRenamed == 0);
++    CHECK(test.database.countEvents(second.sessionId) == 0); // 抖动静默对齐，零事件
++
++    const auto third = test.scanner.scanRoot(test.root); // 重扫收敛
++    CHECK(third.filesChanged == 0 && third.filesAdded == 0 && third.filesRemoved == 0);
++    CHECK(test.database.countEvents(third.sessionId) == 0);
++
++    // 2) 文件夹级：重命名 + 内部文件 mtime 微移
++    writeFile(test.root / "Album Old" / "a.flac", "bytes-a");
++    writeFile(test.root / "Album Old" / "b.flac", "bytes-b");
++    const auto first = test.scanner.scanRoot(test.root);
++    CHECK(first.filesAdded == 2);
++
++    const auto folderBefore = test.database.findFolderByRel(first.scanRootId, "Album Old");
++    CHECK(folderBefore.has_value());
++
++    fs::rename(test.root / "Album Old", test.root / "Album New");
++    const auto innerFile = test.root / "Album New" / "a.flac";
++    fs::last_write_time(innerFile,
++                        fs::last_write_time(innerFile) + std::chrono::milliseconds(1000));
++
++    const auto renamed = test.scanner.scanRoot(test.root);
++    CHECK(renamed.foldersRenamed == 1); // 签名按容差匹配，识别为重命名
++    CHECK(renamed.foldersAdded == 0 && renamed.foldersRemoved == 0);
++    CHECK(renamed.filesAdded == 0 && renamed.filesRemoved == 0);
++    CHECK(renamed.filesChanged == 0 && renamed.filesMoved == 0 && renamed.filesRenamed == 0);
++    // 库中累计：part-1 的 album/01 - song.flac + Album New 的 a/b = 3 files；
++    // 文件夹：root + album + Album New = 3
++    CHECK(test.database.countFiles(renamed.scanRootId) == 3);
++    CHECK(test.database.countFolders(renamed.scanRootId) == 3);
++    const auto folderAfter = test.database.findFolderByRel(renamed.scanRootId, "Album New");
++    CHECK(folderAfter.has_value());
++    CHECK(folderAfter->entityId == folderBefore->entityId);
++
++    const auto steady = test.scanner.scanRoot(test.root); // 重扫收敛
++    CHECK(steady.filesChanged == 0 && steady.filesAdded == 0 && steady.filesRemoved == 0);
++    CHECK(steady.foldersAdded == 0 && steady.foldersRemoved == 0 && steady.foldersRenamed == 0);
++    CHECK(test.database.countFiles(steady.scanRootId) == 3);
++}
++
+ // ── T-SCAN-05（部分）：损坏/空内容文件不阻断扫描 ──
+ void testDamagedFile() {
+     std::cout << "[T-SCAN-05] damaged/no-tag file doesn't block scan\n";
+@@ -357,6 +420,7 @@ int main() {
+     testScanRemoveAndRevive();
+     testScanMoveAndRename();
+     testFolderRename();
++    testScanMtimeJitterIdempotent();
+     testRootUnavailable();
+     testDamagedFile();
+ 

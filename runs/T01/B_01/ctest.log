@@ -1,0 +1,25 @@
+Test project <EVAL_WS>/work/T01_B/build_eval
+      Start  1: mgi_m3
+ 1/10 Test  #1: mgi_m3 ...........................   Passed    1.59 sec
+      Start  2: mgi_m4
+ 2/10 Test  #2: mgi_m4 ...........................   Passed    1.19 sec
+      Start  3: mgi_m5
+ 3/10 Test  #3: mgi_m5 ...........................   Passed    0.91 sec
+      Start  4: mgi_m6
+ 4/10 Test  #4: mgi_m6 ...........................   Passed    0.74 sec
+      Start  5: mgi_m8
+ 5/10 Test  #5: mgi_m8 ...........................   Passed    1.43 sec
+      Start  6: mgi_m9
+ 6/10 Test  #6: mgi_m9 ...........................   Passed    0.64 sec
+      Start  7: mgi_m10_m11
+ 7/10 Test  #7: mgi_m10_m11 ......................   Passed    0.47 sec
+      Start  8: mgi_m16
+ 8/10 Test  #8: mgi_m16 ..........................   Passed    0.62 sec
+      Start  9: mgi_m14
+ 9/10 Test  #9: mgi_m14 ..........................   Passed    0.41 sec
+      Start 10: mgi_m15
+10/10 Test #10: mgi_m15 ..........................   Passed    0.61 sec
+
+100% tests passed, 0 tests failed out of 10
+
+Total Test time (real) =   8.63 sec
