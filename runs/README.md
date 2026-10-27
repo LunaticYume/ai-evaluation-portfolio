@@ -99,6 +99,7 @@ ctest --test-dir build-eval --output-on-failure > ctest.log 2>&1
 1. 冻结 rubric（已完成，见根目录 rubric.md）
 2. 把任务描述原样发给 Agent（不加提示、不给答案）
    - harness 预置测试：gold 提交自带套件测试文件的任务（M 系列里程碑任务，如 T12 的 `tests/test_m6_view.cpp`），先由评测方 `git checkout <gold_commit> -- tests/<测试文件>` 放进工作区，再发给 Agent；C2 的 `tests/` 零改动以 Agent 会话起点之后的 diff 为准，预置文件不计入 Agent 改动
+   - 同权限的含义：各 Agent 拿到**逐字相同**的任务原文与等价 prepared 工作副本（同 baseline、同预置测试、同 allowed_paths / verify），可用工具集相同；评分材料只差被测 Agent 本身
 3. 等它宣布完成
 4. 保存 transcript → 取 git diff → 你自己复跑 ctest
 5. 按 CHECKLIST.md 核对三件套是否齐全
