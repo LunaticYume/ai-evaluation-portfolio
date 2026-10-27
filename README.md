@@ -12,7 +12,7 @@
 
 | 角色 | 仓库 | 在这里的作用 |
 |---|---|---|
-| 评测基座 | [MagicGrimoireIntegratedIndex](https://github.com/LunaticYume/MagicGrimoireIntegratedIndex) | 15 条功能任务 + 3 条负控制跑在它上面，任务全部从真实 commit 反推 |
+| 评测基座 | [MagicGrimoireIntegratedIndex](https://github.com/LunaticYume/MagicGrimoireIntegratedIndex) | 15 条功能任务 + 3 条负控制跑在它上面，功能任务全部从真实 commit 反推，3 条负控制为构造场景 |
 | 诊断场景 | [KyoKiNexus](https://github.com/LunaticYume/KyoKiNexus) | T09 专用：它的开发态基线本身就是红的，考的是"能不能定位单一根因" |
 | 本作品集 | [ai-evaluation-portfolio](https://github.com/LunaticYume/ai-evaluation-portfolio) | 当前仓库 |
 
@@ -32,7 +32,7 @@
 | 实测结果 | **ctest 22/22 套件通过**；终报另记 625 项断言（含 GUI 669） |
 | 断言口径来源 | 仓库 `docs/FINAL_TEST_REPORT.md`（修正提交 `7136638`） |
 | 基线全量耗时 | 68 秒（2026-10 实测） |
-| 逐套件实跑记录 | 2026-10-13，22 个套件 `exit=0`，见 `AGENTS.md` §5-A |
+| 逐套件实跑记录 | 2026-10-13，22 个套件 `exit=0`，见 `AGENTS.md` §5-A（日志本地留存、不随仓库发布；公开核验以按本节命令复跑为准） |
 
 > **口径说明（重要，两个坑）**
 >
@@ -77,6 +77,8 @@ gold     = 该 commit 本身（客观答案）
 
 每条任务的完整字段见 `tasks.jsonl`（`baseline / gold_commit / task / allowed_paths / forbidden_paths / verify`）。
 
+> **harness 预置说明**：M 系列里程碑任务的 gold 提交自带该套件的测试文件（如 T12 的 `tests/test_m6_view.cpp`）。这类测试文件由评测方在 Agent 开工前 checkout 进工作区（`git checkout <gold_commit> -- tests/<测试文件>`），不加提示；C2 的 `tests/` 零改动以 Agent 会话起点之后的 diff 为准，预置文件不计入 Agent 改动。
+
 ---
 
 ## 3. 评分细则
@@ -100,12 +102,14 @@ gold     = 该 commit 本身（客观答案）
 
 运行记录怎么交、怎么存、怎么判，见 [`runs/README.md`](runs/README.md) 与 [`CHECKLIST.md`](CHECKLIST.md)；台账一致性用 `python scripts/validate_results.py` 校验。
 
+跑完首批并评分后，再用另一模型对已评分的 transcript 独立复评，计算 LLM-as-a-Judge 与人工判定的一致率；Bad Case 分析与这一致率分析在首批之后一并产出。
+
 ---
 
 ## 5. 已知局限
 
 - 每条任务只跑 1 次，**无法区分能力与随机性**。要区分至少需要 3 次重复。
-- `allowed_paths` 取自 gold commit 的改动文件，可能比"最小必要改动"更宽，会给 D2 一定宽容度。
+- `allowed_paths` 取自 gold commit 的实现文件（`docs/` 与记录性脚本刻意排除，逐卡理由见 `tasks/*.md` 口径备注），可能比"最小必要改动"更宽，会给 D2 一定宽容度。
 - 负控制只有 3 条，统计效力有限。
 - **T09 是诊断类任务，判据依赖人工归因**——"根因说得对不对"没有机器可判的唯一答案，只能对照 `expected_behavior` 逐条核对。这是本集子里唯一一条不完全客观的任务。
 - 单人评分，一致性未知（除非补充外部复评）。
@@ -143,11 +147,12 @@ gold     = 该 commit 本身（客观答案）
 ```
 AGENTS.md          Agent 工作入口 + 外部素材索引（先读这个）
 tasks.jsonl        19 条任务（15 功能 + 1 诊断 + 3 负控制）
+tasks/             19 张任务卡 + CANDIDATES.md（查过不收的 6 个套件的排除记录）
 rubric.md          评分细则（10 检查 → 6 维），已冻结
 results.csv        运行结果（待填）
 CHECKLIST.md       上传运行记录前的自查清单
 runs/              每次运行的 transcript 与 diff，规范见 runs/README.md
-bad_cases/         失败样本分析，四要素：输入 / 输出片段 / 为什么算错 / 归因
+bad_cases/         失败样本分析，五要素：输入 / 输出片段 / 为什么算错 / 归因 / 可执行的改进
 scripts/           validate_results.py：台账与目录一致性校验
 UPLOAD_MANIFEST.md 哪些上传、哪些只留本地（脱敏规则）
 .gitignore         同一套规则的机器可读版本

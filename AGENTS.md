@@ -17,7 +17,7 @@
 
 | 角色 | 链接 | 在这里的作用 |
 |---|---|---|
-| **评测基座** | [MagicGrimoireIntegratedIndex](https://github.com/LunaticYume/MagicGrimoireIntegratedIndex) | T01–T08、T10–T15、N01–N03 全部跑在它上面；任务从它的真实 commit 反推 |
+| **评测基座** | [MagicGrimoireIntegratedIndex](https://github.com/LunaticYume/MagicGrimoireIntegratedIndex) | T01–T08、T10–T16、N01–N03 全部跑在它上面；任务从它的真实 commit 反推 |
 | **诊断场景** | [KyoKiNexus](https://github.com/LunaticYume/KyoKiNexus) | T09 唯一使用。它的**当前开发态基线本身就是红的**，这正是 T09 要考的东西 |
 | **本作品集** | [ai-evaluation-portfolio](https://github.com/LunaticYume/ai-evaluation-portfolio) | 就是你现在读的仓库 |
 
@@ -34,9 +34,9 @@
 ```
 tasks.jsonl     19 条任务（15 功能 / 1 诊断 / 3 负控制），字段见下方 §3
 rubric.md       评分细则（10 检查 C1–C10 → 6 维 D1–D6）。**已冻结，不许改**
-results.csv     运行台账（22 列）。当前只有表头
+results.csv     运行台账（24 列）。当前只有表头
 runs/           每次运行的证据，目录规范见 runs/README.md
-bad_cases/      失败样本分析，四要素：输入 / 输出片段 / 为什么算错 / 归因
+bad_cases/      失败样本分析，五要素：输入 / 输出片段 / 为什么算错 / 归因 / 可执行的改进
 scripts/        validate_results.py：校验台账与目录一致性
 CHECKLIST.md    上传一次运行记录前的自查清单
 ```
@@ -90,7 +90,7 @@ CHECKLIST.md    上传一次运行记录前的自查清单
 
 ### D. 知识与岗位校准
 
-AI 产品测试与传统测试的差别（预期不唯一）；评测岗 JD 关键词（Benchmark / Golden Set / 评测任务集合 / 质量基线）；个人能力矩阵与薄弱点。
+AI 产品测试与传统测试的差别（预期不唯一）；评测岗 JD 关键词（Benchmark / Golden Set / 评测任务集合 / 质量基线）；个人校准材料（内容与路径不写入公开文件，见 UPLOAD_MANIFEST.md §1.3）。
 
 ### E. 已被本仓库取代（不要再用）
 
@@ -110,4 +110,4 @@ AI 产品测试与传统测试的差别（预期不唯一）；评测岗 JD 关�
 2. 改 `tasks.jsonl` 前先 `git log -1 <hash>` 验 commit；改完再跑一次校验脚本。
 3. 引用任何数字前，回到 §5 确认它属于哪个口径（315 还是 625）。
 4. 不要替用户"预填" `results.csv`。没有真实运行就没有行。
-5. 不要动 `rubric.md`、不要动 `bad_cases/TEMPLATE.md` 的四要素结构。
+5. 不要动 `rubric.md`、不要动 `bad_cases/TEMPLATE.md` 的五要素结构。

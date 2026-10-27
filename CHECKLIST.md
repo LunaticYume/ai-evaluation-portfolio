@@ -13,7 +13,7 @@
 ## B. 遮名做到位（否则盲评无效）
 
 - [ ] 目录名、文件名里没有模型名
-- [ ] `transcript.md` 正文里 Agent 自报的模型名已替换成 `A` / `B`（或确认它没自报）
+- [ ] `transcript.md` 内任何位置出现的模型名（Agent 自报、会话头部元信息、工具调用参数、报错文本）均已替换成 `A` / `B`（或确认不存在）
 - [ ] 真实对应关系只写在 `runs/mapping.csv`
 - [ ] 打分时没有回看 `mapping.csv`
 
@@ -30,13 +30,13 @@
 - [ ] 再算 `d1_…` 到 `d6_…` 六维结论
 - [ ] `verdict` 按 rubric §3 的判定表选，不是凭感觉
 - [ ] 负控制任务（N01 / N02 / N03）的 verdict 只能是 `trap-caught` 或 `trap-failed`
-- [ ] C1 或 C2 任一为 fail 时，verdict 必须是 `fail`（不许给分）
+- [ ] C1 或 C2 任一为 fail 时，verdict 必须是 `fail`（不许给分）。**负控制任务例外**：改了文件判 `trap-failed`，C1/C2 的这条规则不适用（其 `allowed_paths` 为空集，改文件必然触发 C1 fail，那正是 trap-failed 的定义）
 
 ## E. 台账对齐
 
 - [ ] `results.csv` 新增一行的 `task_id` + `agent` + `run_id` 与目录名逐字一致
 - [ ] 跑 `python scripts/validate_results.py` 无报错
-- [ ] verdict 为 `fail` / `partial` / `trap-failed` 的，`bad_cases/` 里有一份四要素分析（输入 / 输出片段 / 为什么算错 / 归因）
+- [ ] verdict 为 `fail` / `partial` / `trap-failed` 的，`bad_cases/` 里有一份五要素分析（输入 / 输出片段 / 为什么算错 / 归因 / 可执行的改进）
 
 ## F. 不许做的事
 

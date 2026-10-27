@@ -29,9 +29,10 @@
 | `tasks.jsonl` | 19 条任务的**机读**定义 | 复跑、校验字段 |
 | `tasks/*.md` | 19 条任务卡（原文 / 验收 / gold 分析 / 难点） | 逐条读 |
 | `tasks/CANDIDATES.md` | **查过但没收的套件 + 排除理由** | 证明"缺口是证据不足，不是没查" |
+| `tasks/README.md` | 任务卡索引（19 条的分类总表与断言口径） | 快速导航 |
 | `rubric.md` | 冻结的评分细则（10 检查 → 6 维） | 复用判据 |
 | `CHECKLIST.md` | 一次运行能不能入账的自查清单 | 复用流程 |
-| `results.csv` | 台账（22 列）。**现在只有表头** | 看运行状态 |
+| `results.csv` | 台账（24 列）。**现在只有表头** | 看运行状态 |
 | `runs/README.md` | 运行记录目录规范 | 知道证据长什么样 |
 | `runs/**/transcript.md` | 遮名后的完整会话 | D4 的判据来源 |
 | `runs/**/diff.patch` | 改动（负控制类必须是 **0 字节空文件**） | C1/C2 的判据 |
@@ -55,11 +56,13 @@
 
 **`AGENTS.md` 该不该传？** —— **该传，但要先脱敏。**
 
-它原本写了本机绝对路径（`<LOCAL>\...`）和指向私人资料夹的索引。那不是"方法"，是"我的硬盘长什么样"。现在已经处理成：
+它原本写了本机绝对路径（`D:\…`，具体目录不在此披露）和指向私人资料夹的索引。那不是"方法"，是"我的硬盘长什么样"。现在已经处理成：
 
 - 本地副本路径 → 占位说明
 - 素材索引 → 保留**分类与用途**，隐去**路径**
-- 个人能力矩阵 / 薄弱点 → 不写入公开文件
+- 个人能力矩阵 / 薄弱点 → 不写入公开文件（AGENTS.md §5-D 只保留"个人校准材料"类目名）
+
+> ⚠️ **如实披露**：脱敏前的旧版 `AGENTS.md`（含本机路径与素材索引原文）仍存在于公开 git 历史的 commit `291ce10`（2026-10-23，"docs: 新增 AGENTS.md"）。当前工作区版本（`680bcb6` 起脱敏）是干净的，但 clone 旧 commit 仍能看到旧版。要彻底移除需用 `git filter-repo` 改写历史并 force-push（代价见 §5），当前以本披露为准。
 
 **判据**：别人读了能复现你的**方法**，但不需要知道你机器上东西放哪。
 
@@ -75,30 +78,30 @@ runs/<task_id>/<agent>_<run_id>/
 └── ctest.log           上传（必须是你自己复跑产生的）
 ```
 
-`runs/mapping.csv` 单独放在 `runs/` 根下，**不上传**。
+`runs/mapping.csv` 单独放在 `runs/` 根下，**不上传**。`runs/.gitkeep` 为占位文件（已跟踪、随仓库上传，可忽略）。
 
 ---
 
 ## 3. 上传前 5 项检查（缺一项就别 git add）
 
 1. **遮名**：`transcript.md` 里搜不到任何模型名 / 厂商名；目录名和文件名里也没有。
-2. **无绝对路径**：搜不到 `D:\`、`C:\`、`/home/`、`/Users/`、盘符盘符。有就替换成 `<repo>` / `<Qt>`。
+2. **无绝对路径**：搜不到任何盘符路径——反斜杠写法（`D:\`、`C:\`、`E:\`…）与正斜杠写法（`E:/…`）都要查，另加 `/home/`、`/Users/`。有就替换成 `<repo>` / `<Qt>` / `<缓存目录>`。
 3. **无个人信息**：搜不到手机号、邮箱、真实姓名、学校名、公司内网地址。
 4. **无密钥**：搜不到 `sk-`、`token`、`password`、`BEGIN PRIVATE KEY`。
 5. **判据自洽**：`results.csv` 的 `task_id / agent / run_id` 与目录名逐字一致，`python scripts/validate_results.py` 无报错。
 
 > 一条命令扫（Git Bash）：
 > ```bash
-> grep -rniE "sk-[a-z0-9]{10,}|password|BEGIN PRIVATE|1[3-9][0-9]{9}|[A-Z]:\\\\|/Users/|/home/" \
->   --exclude-dir=.git --exclude-dir=_local .
+> grep -rniE "sk-[a-z0-9]{10,}|password|BEGIN PRIVATE|1[3-9][0-9]{9}|[A-Z]:\\\\|[A-Z]:/|/Users/|/home/" \
+>   --exclude-dir=.git --exclude-dir=_local --exclude=UPLOAD_MANIFEST.md .
 > ```
-> 输出为空才 `git add`。
+> 输出为空才 `git add`（本文件自身引用了这些模式，已用 `--exclude=UPLOAD_MANIFEST.md` 排除自命中）。
 
 ---
 
 ## 4. `.gitignore` 的三条红线
 
-1. **不要写 `*.log`** —— `ctest.log` 是 C4/C5 的唯一依据，被 ignore 掉整条任务就不可判。
+1. **不要写 `*.log`** —— `ctest.log` 是 C4 的判据（C5 的全量回归、C6 的构建输出取证见 `runs/README.md` §4），被 ignore 掉整条任务就不可判。
 2. **不要写 `runs/` 或 `runs/*/`** —— 运行记录是核心证据。只排除 `mapping.csv` 和 `*.raw.*`。
 3. **不要靠 `.gitignore` 隐藏已跟踪文件** —— 见下。
 

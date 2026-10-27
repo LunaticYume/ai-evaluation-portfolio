@@ -79,6 +79,7 @@ $ git log -S"mgi_m28" --format=%H -- CMakeLists.txt | tail -1
 
 - `mgi_trem`（`test_t2_t8_remediation.cpp`，26 个 `CHECK`）是 T2/T8 问题的**补救回归**，没有独立的用户可感知功能，也没有出现在 `FINAL_TEST_REPORT.md` 的表里。它存在的意义是"防止旧问题复发"，不是"实现一个需求"。
 - `mgi_gui`（44 项）来自 `USER_ACCEPTANCE §1–§5`，需要**人工点界面**。本仓库的 rubric 只用两类依据——机器证据（diff / ctest 退出码 / transcript）和对照证据（`allowed_paths`）。人工验收项两类都不是，判不了。**这条缺口要写进 README 的已知局限，不要假装覆盖了。**
+- **口径调和**（与根 README §1/§5 对齐）：MGI 基线 `CMakeLists.txt` 里 `add_test(NAME mgi_gui COMMAND mgi_tests_gui)` 确实是 22 个 ctest 入口之一，offscreen 入口可自动跑（属 README 所说 22/22 之内）；但那 44 项验收判据本身需要人工点界面，rubric 的两类证据都判不了，故仍不收录为任务。
 
 ---
 
