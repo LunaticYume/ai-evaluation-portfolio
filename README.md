@@ -49,6 +49,7 @@
 git checkout d0024b2
 cmake -B build -G Ninja
 cmake --build build
+cp <已有可用构建目录>/sqlite3.dll build/   # Windows 下为 copy /y。关键：测试进程依赖构建目录里有 sqlite3.dll（Qt 与系统 PATH 都不提供）；缺它所有测试在第一个数据库用例静默崩溃（有输出、无断言、退出码非零）——先排除环境问题，再谈产品缺陷
 export PATH="<Qt>/6.11.2/mingw_64/bin:$PATH"   # 关键：缺这个会全线 0xc0000139 / 0xc0000135
 ctest --test-dir build
 ```
@@ -102,7 +103,7 @@ gold     = 该 commit 本身（客观答案）
 
 运行记录怎么交、怎么存、怎么判，见 [`runs/README.md`](runs/README.md) 与 [`CHECKLIST.md`](CHECKLIST.md)；台账一致性用 `python scripts/validate_results.py` 校验。
 
-跑完首批并评分后，再用另一模型对已评分的 transcript 独立复评，计算 LLM-as-a-Judge 与人工判定的一致率；Bad Case 分析与这一致率分析在首批之后一并产出。
+跑完首批并评分后，再用另一模型对已评分的 transcript 独立复评，计算 LLM-as-a-Judge 与人工判定的一致率；Bad Case 分析与这一致率分析在首批之后一并产出——**首批的 4 份 Bad Case（[`bad_cases/01–04`](bad_cases/)）与一致性复评已完成：verdict 一致率 4/4，详见 [`JUDGE_CONSISTENCY.md`](JUDGE_CONSISTENCY.md)**（复评者为同模型全新盲评实例；跨模型复评在扩量批次补做）。
 
 ---
 
